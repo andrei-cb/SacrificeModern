@@ -1,0 +1,45 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name":"base", "hidden":true, "generator":"Ninja",
+      "binaryDir":"${sourceDir}/out/${presetName}",
+      "toolchainFile":"${sourceDir}/cmake/vcpkg-toolchain.cmake",
+      "cacheVariables":{
+        "CMAKE_CXX_COMPILER":"cl.exe", "BUILD_TESTING":true,
+        "VCPKG_TARGET_TRIPLET":"x64-windows",
+        "VCPKG_INSTALLED_DIR":"${sourceDir}/out/vcpkg_installed",
+        "VCPKG_INSTALL_OPTIONS":"--x-buildtrees-root=${sourceDir}/out/buildtrees;--x-packages-root=${sourceDir}/out/packages"
+      },
+      "environment":{
+        "VCPKG_DOWNLOADS":"${sourceDir}/out/downloads",
+        "X_VCPKG_REGISTRIES_CACHE":"${sourceDir}/out/registries",
+        "VCPKG_DEFAULT_BINARY_CACHE":"${sourceDir}/out/binary-cache"
+      }
+    },
+    {"name":"debug", "inherits":"base", "cacheVariables":{"CMAKE_BUILD_TYPE":"Debug"}},
+    {"name":"release", "inherits":"base", "cacheVariables":{"CMAKE_BUILD_TYPE":"Release"}},
+    {"name":"asan", "inherits":"base", "cacheVariables":{"CMAKE_BUILD_TYPE":"RelWithDebInfo","SACRIFICE_ASAN":true}},
+    {"name":"web-base", "hidden":true, "generator":"Ninja",
+      "binaryDir":"${sourceDir}/out/${presetName}",
+      "toolchainFile":"$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables":{"BUILD_TESTING":true,"FETCHCONTENT_BASE_DIR":"${sourceDir}/out/web-deps",
+        "EMSDK_NODE":"$env{EMSDK_NODE}"}},
+    {"name":"web-debug", "inherits":"web-base", "cacheVariables":{"CMAKE_BUILD_TYPE":"Debug"}},
+    {"name":"web-release", "inherits":"web-base", "cacheVariables":{"CMAKE_BUILD_TYPE":"Release"}}
+  ],
+  "buildPresets":[
+    {"name":"debug","configurePreset":"debug"},
+    {"name":"release","configurePreset":"release"},
+    {"name":"asan","configurePreset":"asan"},
+    {"name":"web-debug","configurePreset":"web-debug"},
+    {"name":"web-release","configurePreset":"web-release"}
+  ],
+  "testPresets":[
+    {"name":"debug","configurePreset":"debug","output":{"outputOnFailure":true}},
+    {"name":"release","configurePreset":"release","output":{"outputOnFailure":true}},
+    {"name":"asan","configurePreset":"asan","output":{"outputOnFailure":true}},
+    {"name":"web-debug","configurePreset":"web-debug","output":{"outputOnFailure":true}},
+    {"name":"web-release","configurePreset":"web-release","output":{"outputOnFailure":true}}
+  ]
+}

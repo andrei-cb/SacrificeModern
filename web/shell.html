@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SacrificeModern</title>
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: #080d13; color: #e5ebf2; font: 16px system-ui,sans-serif; }
+    header { height: 44px; display: flex; gap: 16px; align-items: center; padding: 0 16px; background: #121b25; }
+    header strong { margin-right: auto; } header span { font-size: 13px; color: #aab8c8; }
+    button, .pick { font: inherit; border: 1px solid #53677d; border-radius: 5px; color: inherit; background: #203348; padding: 9px 16px; cursor: pointer; }
+    button:disabled { opacity: .45; cursor: default; }
+    #fullscreen { padding: 4px 12px; font-size: 13px; }
+    #viewport { position: absolute; inset: 44px 0 0; }
+    #viewport:fullscreen { inset: 0; background: #080d13; }
+    #canvas { display: block; width: 100% !important; height: 100% !important; outline: none; }
+    #loader, #error { position: absolute; inset: 0; display: grid; place-content: center; padding: 28px; background: #080d13ec; }
+    section { max-width: 660px; width: min(660px,90vw); padding: 32px; border: 1px solid #314253; border-radius: 12px; background: #101b27; }
+    h1 { font-size: 28px; margin: 0 0 16px; } p { line-height: 1.6; color: #b9c6d6; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }
+    #forget { background: transparent; }
+    .pick.alt { background: transparent; } .pick.done { border-color: #7fc48f; } .pick.done::before { content: "¹3  "; }
+    .pick:has(input:disabled) { opacity: .45; cursor: default; }
+    #status { min-height: 3em; overflow-wrap: anywhere; } progress { width: 100%; }
+    #drop.drag { border-color: #9bd1ff; background: #18304b; }
+    #error { z-index: 10; } #error-message { white-space: pre-wrap; color: #ffb7b7; }
+  </style>
+</head>
+<body>
+  <header><strong>SacrificeModern</strong><span id="hint">Web preview · your own game files</span><button id="fullscreen" disabled>Fullscreen</button></header>
+  <main id="viewport">
+    <canvas id="canvas" tabindex="0" hidden></canvas>
+    <div id="loader"><section id="drop">
+      <h1>Open your Sacrifice installation</h1>
+      <p>Select the <b>data</b> and <b>maps</b> folders from your installation (both are needed), or drop them here together. Only those two folders are read; game files stay in this browser and are cached for later visits.</p>
+      <p>Explore maps and play the Trial sandbox with the original assets. The full menu/campaign frontend is still being ported.</p>
+      <div class="actions"><label class="pick" id="data-pick">Select data folder<input id="data-folder" type="file" webkitdirectory multiple hidden></label><label class="pick" id="maps-pick">Select maps folder<input id="maps-folder" type="file" webkitdirectory multiple hidden></label><label class="pick alt">Whole installation<input id="folder" type="file" webkitdirectory multiple hidden></label><button id="start" disabled>Open cached files</button><button id="forget" disabled>Forget game files</button></div>
+      <progress id="progress" hidden></progress><p id="status" role="status">Preparing the engine…</p>
+    </section></div>
+    <div id="error" role="alert" hidden><section><h1>Unable to start</h1><p id="error-message"></p><button onclick="location.reload()">Reload</button></section></div>
+  </main>
+  <script src="loader.js"></script>
+  {{{ SCRIPT }}}
+</body>
+</html>

@@ -1,0 +1,51 @@
+# Build output, downloaded tools and dependencies
+/out/
+/build/
+/vcpkg_installed/
+CMakeUserPresets.json
+
+# Local working notes
+/docs/
+
+# IDEs and editors
+/.vs/
+/.vscode/
+/.idea/
+*.user
+*.suo
+*.swp
+*~
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs, captures and crash dumps
+*.log
+*.err
+*.bmp
+*.dmp
+
+# IDA databases
+*.idb
+*.i64
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+
+# Original game files must never be committed
+*.wad
+*.scp
+*.wiz
+*.exe
+*.dll
+
+# Tests (kept local; fixtures are generated from the original game data)
+/tests/

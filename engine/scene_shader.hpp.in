@@ -1,0 +1,2 @@
+#pragma once
+inline constexpr char web_scene_shader[] = R"wgsl(@SCENE_WGSL@)wgsl";
