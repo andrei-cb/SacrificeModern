@@ -1066,16 +1066,15 @@ void WebSceneRenderer::advance(float seconds, bool single_step) {
     const bool changed =
         apply_terrain_changes(*p.catalog, *p.simulation, p.terrain, p.materials, p.applied_tiles, p.scars);
     if (changed) {
-        const auto layers = 256 + p.materials.scars.size();
-        for (unsigned tile = 0; tile < layers; ++tile)
+        // Only the scar layers whose texels changed are written again (the array holds the whole pool).
+        for (const auto tile : p.land.update_tiles(p.materials, p.terrain, false))
             for (unsigned mip = 0; mip < 7; ++mip) {
                 const auto* source = tile < 256
                                          ? (p.materials.tiles[tile] ? &*p.materials.tiles[tile] : nullptr)
                                          : &p.materials.scars[tile - 256];
                 if (source)
-                    p.write_texture(p.tiles, tile, mip, 64u >> mip, source->mipmaps[mip].rgba);
+                    p.write_texture(p.tiles, static_cast<unsigned>(tile), mip, 64u >> mip, source->mipmaps[mip].rgba);
             }
-        p.land.update_tiles(p.materials, p.terrain);
         // Falling land blocks look their cells' textures up again (scars move layers).
         std::erase_if(p.effect_images, [](const auto& entry) {
             return entry.first.value >= effect_land_tile && entry.first.value < effect_land_edge;
@@ -1083,7 +1082,8 @@ void WebSceneRenderer::advance(float seconds, bool single_step) {
     }
     if (changed || p.land_revision != match.terrain_revision) {
         p.land_revision = match.terrain_revision;
-        p.land.reset(p.terrain);
+        if (!p.land.refresh(p.terrain))
+            p.land.reset(p.terrain);
         if (!p.land.lod) {
             const auto mesh = p.terrain.mesh(true);
             p.land_vertices =

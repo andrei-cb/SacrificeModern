@@ -80,6 +80,8 @@ struct Terrain {
     // LAND::GetPlane 0x16040730 cell split: true for the (x,y)-(x+1,y+1) diagonal.
     [[nodiscard]] bool main_diagonal(unsigned x, unsigned y) const;
     [[nodiscard]] Mesh mesh(bool tiled = false) const;
+    // One vertex of mesh(false): position, light and slope normal of sample (x, y), x < width, y < height.
+    [[nodiscard]] Vertex grid_vertex(unsigned x, unsigned y) const;
     // LAND::DentMap 0x160382f0: lower samples inside `radius` by a cosine-like falloff of `depth`.
     // Bit 15 (hole) is preserved. Missing LAND+72 anchors use 128, as GetAnchorMap does.
     void dent_map(Vec3 position, float radius, float depth);
@@ -125,6 +127,9 @@ struct TerrainLod {
     };
     // Returns an empty grid set for maps other than 256 cells, whose patch indexing the original assumes.
     static TerrainLod build(const Terrain& terrain);
+    // Recomputes what grid points [x0, x1] x [y0, y1] (x, y <= size; size is the extra row and column) reach
+    // after the land changed there, as build would.
+    void update(const Terrain& terrain, int x0, int y0, int x1, int y1);
     // Camera rows in map coordinates (X/Y, 10 units per cell, Z up) and the RENDERWINDOW half-angles in
     // degrees (+24 horizontal, +28 vertical).
     struct Camera {

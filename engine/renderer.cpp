@@ -445,6 +445,9 @@ struct Renderer::Impl : renderer_shared::TerrainView {
     ComPtr<ID3D11SamplerState> sampler, model_sampler;
     std::array<ComPtr<ID3D11SamplerState>, 3> clamp_samplers, wrap_samplers;
     ComPtr<ID3D11ShaderResourceView> image, terrain_tiles, terrain_details;
+    ComPtr<ID3D11Texture2D> terrain_tile_array; // terrain_tiles' texture, layers 256 + the scar pool.
+    UINT terrain_tile_capacity{};
+    void upload_terrain_tiles(const TerrainMaterials& materials, const Terrain& terrain, bool full);
     ComPtr<ID3D11Buffer> tile_details;
     ComPtr<ID3D11Texture2D> window_texture;
     ComPtr<ID3D11ShaderResourceView> terrain_windows, terrain_edge;
@@ -1030,47 +1033,66 @@ void Renderer::ui_additive(ImDrawList& list) {
         p.context->OMSetBlendState(p.additive_blend.Get(), nullptr, 0xffffffff);
     }, impl_.get());
 }
-void Renderer::update_terrain_tiles(const TerrainMaterials& materials, const Terrain& terrain) {
-    std::array<std::vector<std::uint32_t>, 7> defaults;
-    for (unsigned level = 0; level < 7; ++level)
-        defaults[level].resize((64u >> level) * (64u >> level), 0xff000000u);
-    std::vector<D3D11_SUBRESOURCE_DATA> data;
+void Renderer::Impl::upload_terrain_tiles(const TerrainMaterials& materials, const Terrain& terrain, bool full) {
     const auto layers = 256 + materials.scars.size();
     if (layers > D3D11_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)
         throw Error("Too many scarred terrain tiles");
-    data.reserve(layers * 7);
-    for (std::size_t tile = 0; tile < layers; ++tile)
-        for (unsigned level = 0; level < 7; ++level) {
-            const auto width = 64u >> level;
-            const auto* pixels = defaults[level].data();
-            const auto* source = tile < 256 ? (materials.tiles[tile] ? &*materials.tiles[tile] : nullptr)
-                                            : &materials.scars[tile - 256];
-            if (source) {
-                const auto& image = source->mipmaps[level];
-                if (image.width != width || image.height != width || image.rgba.size() != width * width)
-                    throw Error("Invalid terrain mip dimensions");
-                pixels = image.rgba.data();
-            }
-            data.push_back({pixels, width * 4, 0});
-        }
-    auto& p = *impl_;
+    const auto changed = update_tiles(materials, terrain, full);
+    const auto source_of = [&](std::size_t tile) -> const TerrainTile* {
+        if (tile >= layers)
+            return nullptr;
+        return tile < 256 ? (materials.tiles[tile] ? &*materials.tiles[tile] : nullptr) : &materials.scars[tile - 256];
+    };
+    std::array<std::vector<std::uint32_t>, 7> defaults;
+    for (unsigned level = 0; level < 7; ++level)
+        defaults[level].resize((64u >> level) * (64u >> level), 0xff000000u);
+    const auto pixels = [&](const TerrainTile* source, unsigned level) -> const std::uint32_t* {
+        const auto width = 64u >> level;
+        if (!source)
+            return defaults[level].data();
+        const auto& image = source->mipmaps[level];
+        if (image.width != width || image.height != width || image.rgba.size() != width * width)
+            throw Error("Invalid terrain mip dimensions");
+        return image.rgba.data();
+    };
+    if (!full && terrain_tile_array && layers <= terrain_tile_capacity) {
+        // Scars redraw a few layers at a time; re-sending the whole array stalls the frame.
+        for (const auto tile : changed)
+            for (unsigned level = 0; level < 7; ++level)
+                context->UpdateSubresource(terrain_tile_array.Get(),
+                                           D3D11CalcSubresource(level, static_cast<UINT>(tile), 7), nullptr,
+                                           pixels(source_of(tile), level), (64u >> level) * 4, 0);
+        return;
+    }
+    // Room for the whole scar pool ('mscr', at most 256), so later scars fit without a new array.
+    const auto capacity = static_cast<UINT>(std::min<std::size_t>(
+        std::max<std::size_t>(layers, 256 + materials.scar_limit), D3D11_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION));
+    std::vector<D3D11_SUBRESOURCE_DATA> data;
+    data.reserve(capacity * 7);
+    for (std::size_t tile = 0; tile < capacity; ++tile)
+        for (unsigned level = 0; level < 7; ++level)
+            data.push_back({pixels(source_of(tile), level), (64u >> level) * 4, 0});
     D3D11_TEXTURE2D_DESC desc{};
     desc.Width = desc.Height = 64;
     desc.MipLevels = 7;
-    desc.ArraySize = static_cast<UINT>(layers);
+    desc.ArraySize = capacity;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     ComPtr<ID3D11Texture2D> texture;
-    hr(p.device->CreateTexture2D(&desc, data.data(), &texture), "UploadTerrainTiles");
+    hr(device->CreateTexture2D(&desc, data.data(), &texture), "UploadTerrainTiles");
     ComPtr<ID3D11ShaderResourceView> view;
-    hr(p.device->CreateShaderResourceView(texture.Get(), nullptr, &view), "CreateTerrainTileView");
-    p.terrain_tiles = std::move(view);
-    p.update_tiles(materials, terrain);
+    hr(device->CreateShaderResourceView(texture.Get(), nullptr, &view), "CreateTerrainTileView");
+    terrain_tile_array = std::move(texture);
+    terrain_tile_capacity = capacity;
+    terrain_tiles = std::move(view);
+}
+void Renderer::update_terrain_tiles(const TerrainMaterials& materials, const Terrain& terrain) {
+    impl_->upload_terrain_tiles(materials, terrain, false);
 }
 void Renderer::set_terrain_materials(const TerrainMaterials& materials) {
-    update_terrain_tiles(materials, {});
+    impl_->upload_terrain_tiles(materials, {}, true);
     auto& p = *impl_;
     D3D11_TEXTURE2D_DESC desc{};
     desc.SampleDesc.Count = 1;
@@ -1141,6 +1163,16 @@ void Renderer::set_terrain_lod(const Terrain& terrain) {
     hr(p.device->CreateShaderResourceView(p.window_texture.Get(), nullptr, &p.terrain_windows),
        "CreateTerrainWindowView");
 
+}
+void Renderer::update_terrain(const Terrain& terrain) {
+    auto& p = *impl_;
+    // The tiled mesh only draws without a land view (Renderer::draw); with one, the view is patched in place.
+    if (p.lod && p.terrain_tiles && p.widget_terrain && p.refresh(terrain)) {
+        p.widget_terrain = terrain;
+        return;
+    }
+    set_mesh(terrain.mesh(true));
+    set_terrain_lod(terrain);
 }
 void Renderer::set_scene(const MapScene& scene) {
     clear_scene();
@@ -1972,6 +2004,8 @@ void Renderer::draw(const Camera& camera, bool wireframe, bool model_materials, 
             p.grass_chunks.clear();
             p.grass_chunk_generation = p.grass_generation();
         }
+        for (const auto key : p.take_dirty_grass_chunks()) // Land edits (Bore, scars) rebuild only their chunks.
+            p.grass_chunks.erase(key);
         constexpr int cells = renderer_shared::TerrainView::grass_chunk_cells;
         const float reach = tuning::grass_range, span = cells * 10.0f;
         const float ex = camera.position.x, ez = camera.position.z;

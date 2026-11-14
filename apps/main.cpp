@@ -1179,9 +1179,10 @@ struct Inspector {
             }
             if (applied_land_revision != simulation->match().terrain_revision) {
                 applied_land_revision = simulation->match().terrain_revision;
-                renderer.set_mesh(terrain.mesh(!preview));
-                if (!preview)
-                    renderer.set_terrain_lod(terrain);
+                if (preview)
+                    renderer.set_mesh(terrain.mesh(false));
+                else
+                    renderer.update_terrain(terrain);
             }
         }
         // Souls (0x475ee0) advance on the same 1/60 s object ticks; their flat grids hold one material.

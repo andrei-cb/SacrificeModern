@@ -68,10 +68,14 @@ class Renderer {
     void ui_additive(ImDrawList& list);
     void clear_image();
     void set_terrain_materials(const TerrainMaterials& materials);
-    // Replaces only tile/scar textures and invalidates composed terrain windows.
+    // After scars or SetTile changed the land's tiles: uploads only the scar layers that changed and redraws
+    // the cells whose layer changed.
     void update_terrain_tiles(const TerrainMaterials& materials, const Terrain& terrain);
     // Land view LOD for the tiled mesh: call after set_mesh and set_terrain_materials.
     void set_terrain_lod(const Terrain& terrain);
+    // After the match edited the land (Match::terrain_revision): refreshes the land view in place, rebuilding
+    // only the changed area's vertices and grass; without a land view, rebuilds the tiled mesh instead.
+    void update_terrain(const Terrain& terrain);
     // LAND::SetEdgeTexture: the land view skirts' texture; null hides them.
     void set_terrain_edge(const ModelAsset::Texture* texture);
     // Uploads each scene model once and draws its placements after the main mesh.

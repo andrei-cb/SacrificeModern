@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <ranges>
 namespace sacrifice {
 void Camera::update(const InputState& input, float dt) {
     if (input.looking) {
@@ -158,6 +159,8 @@ void TerrainView::reset(const Terrain& terrain) {
             !terrain.scar_layers.empty() && terrain.scar_layers[cell] ? terrain.scar_layers[cell]
                                                                       : terrain.tiles[cell]);
     cell_bases = terrain.tiles;
+    land_heights_ = terrain.heights;
+    land_light_ = terrain.lightmap;
     const auto grid = terrain.mesh(false);
     const unsigned size = lod->size, pitch = size + 1;
     lod_grid.resize(static_cast<std::size_t>(pitch) * pitch);
@@ -174,29 +177,167 @@ void TerrainView::reset(const Terrain& terrain) {
     tile_grass_.clear();
     ++grass_generation_;
 }
-void TerrainView::update_tiles(const TerrainMaterials& materials, const Terrain& terrain) {
+std::vector<std::size_t> TerrainView::update_tiles(const TerrainMaterials& materials, const Terrain& terrain,
+                                                   bool full) {
     const auto layers = 256 + materials.scars.size();
-    tile_mips.assign(layers, {});
-    for (std::size_t tile = 0; tile < layers; ++tile) {
-        const auto* source = tile < 256 ? (materials.tiles[tile] ? &*materials.tiles[tile] : nullptr)
-                                        : &materials.scars[tile - 256];
+    // Scar layers are only ever added within one tile set; fewer layers means a new one.
+    full = full || tile_mips.size() < 256 || layers < tile_mips.size();
+    const auto source_of = [&](std::size_t tile) -> const TerrainTile* {
+        return tile < 256 ? (materials.tiles[tile] ? &*materials.tiles[tile] : nullptr) : &materials.scars[tile - 256];
+    };
+    std::vector<std::size_t> changed;
+    std::vector<bool> redrawn(layers);
+    if (full) {
+        tile_mips.assign(layers, {});
+        scar_top_.clear();
+    } else
+        tile_mips.resize(layers);
+    scar_top_.resize(layers - 256);
+    for (std::size_t tile = full ? 0 : 256; tile < layers; ++tile) {
+        const auto* source = source_of(tile);
+        auto& mips = tile_mips[tile];
+        if (!full && source && !mips[0].empty() && scar_top_[tile - 256] == source->mipmaps[0].rgba &&
+            std::ranges::all_of(std::views::iota(1u, 7u),
+                                [&](unsigned level) { return mips[level - 1] == source->mipmaps[level].rgba; }))
+            continue;
         for (unsigned level = 1; level < 7; ++level)
-            tile_mips[tile][level - 1] =
-                source ? source->mipmaps[level].rgba
-                       : std::vector<std::uint32_t>((64u >> level) * (64u >> level), 0xff000000u);
+            mips[level - 1] = source ? source->mipmaps[level].rgba
+                                     : std::vector<std::uint32_t>((64u >> level) * (64u >> level), 0xff000000u);
+        if (tile >= 256)
+            scar_top_[tile - 256] = source->mipmaps[0].rgba;
+        changed.push_back(tile);
+        redrawn[tile] = true;
     }
-    composed_valid = false;
-    land = {};
-    grass_cells_.clear();
-    tile_grass_.clear();
-    ++grass_generation_;
+    if (full) {
+        composed_valid = false;
+        land = {};
+        grass_cells_.clear();
+        tile_grass_.clear();
+        dirty_grass_chunks_.clear();
+        ++grass_generation_;
+        if (lod && terrain.tiles.size() == cell_tiles.size()) {
+            for (std::size_t cell = 0; cell < cell_tiles.size(); ++cell)
+                cell_tiles[cell] = static_cast<std::uint16_t>(
+                    !terrain.scar_layers.empty() && terrain.scar_layers[cell] ? terrain.scar_layers[cell]
+                                                                              : terrain.tiles[cell]);
+            cell_bases = terrain.tiles;
+        }
+        return changed;
+    }
+    if (!changed.empty())
+        tile_grass_.clear(); // Reclassified on the next grass build (prepare_grass).
     if (lod && terrain.tiles.size() == cell_tiles.size()) {
-        for (std::size_t cell = 0; cell < cell_tiles.size(); ++cell)
-            cell_tiles[cell] = static_cast<std::uint16_t>(
+        const auto [x0, y0, x1, y1] = refresh_cells(terrain, redrawn);
+        if (x1 >= x0)
+            invalidate_cells(x0 - 1, y0 - 1, x1 + 1, y1 + 1, true); // Grass blends the neighbouring cells' tiles.
+    }
+    return changed;
+}
+std::array<int, 4> TerrainView::refresh_cells(const Terrain& terrain, const std::vector<bool>& redrawn) {
+    const int size = static_cast<int>(lod->size);
+    std::array<int, 4> bounds{size, size, -1, -1};
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            const auto cell = static_cast<std::size_t>(y) * size + x;
+            const auto layer = static_cast<std::uint16_t>(
                 !terrain.scar_layers.empty() && terrain.scar_layers[cell] ? terrain.scar_layers[cell]
                                                                           : terrain.tiles[cell]);
-        cell_bases = terrain.tiles;
+            if (layer == cell_tiles[cell] && terrain.tiles[cell] == cell_bases[cell] &&
+                !(layer < redrawn.size() && redrawn[layer]))
+                continue;
+            cell_tiles[cell] = layer;
+            cell_bases[cell] = terrain.tiles[cell];
+            bounds = {std::min(bounds[0], x), std::min(bounds[1], y), std::max(bounds[2], x), std::max(bounds[3], y)};
+        }
+    return bounds;
+}
+void TerrainView::invalidate_cells(int x0, int y0, int x1, int y1, bool layers) {
+    const int size = static_cast<int>(lod->size);
+    x0 = std::max(x0, 0);
+    y0 = std::max(y0, 0);
+    x1 = std::min(x1, size - 1);
+    y1 = std::min(y1, size - 1);
+    if (x1 < x0 || y1 < y0)
+        return;
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x)
+            grass_cells_.erase(static_cast<std::int64_t>(y) * 65536 + x);
+    constexpr int cells = grass_chunk_cells;
+    for (int y = y0 / cells; y <= y1 / cells; ++y)
+        for (int x = x0 / cells; x <= x1 / cells; ++x)
+            dirty_grass_chunks_.push_back(static_cast<std::int64_t>(y) * 65536 + x);
+    if (dirty_grass_chunks_.size() > 4096) { // Nobody drained the list (the WebGPU backend caches no chunks).
+        dirty_grass_chunks_.clear();
+        ++grass_generation_;
     }
+    for (unsigned i = 0; layers && i < 6; ++i) { // Window texels only show the cells' layers.
+        const auto& w = composed[i];
+        const int wx1 = w.x + static_cast<int>(w.cells) - 1, wy1 = w.y + static_cast<int>(w.cells) - 1;
+        recompose_[i] = recompose_[i] || (x0 <= wx1 && w.x <= x1 && y0 <= wy1 && w.y <= y1);
+    }
+    land = {}; // Rebuild the faces (they carry the cells' layers and the grid's heights), as reset() does.
+}
+bool TerrainView::refresh(const Terrain& terrain) {
+    if (!lod || terrain.width != lod->size || terrain.height != lod->size || lod_grid.empty() ||
+        terrain.tiles.size() != cell_tiles.size() || terrain.lightmap.size() != cell_tiles.size())
+        return false;
+    const int size = static_cast<int>(lod->size), pitch = size + 1;
+    const auto grid_point = [&](int x, int y) { // As reset() fills lod_grid.
+        auto v = terrain.grid_vertex(static_cast<unsigned>(std::min(x, size - 1)),
+                                     static_cast<unsigned>(std::min(y, size - 1)));
+        v.position = {x * 10.0f, terrain.at(static_cast<unsigned>(x), static_cast<unsigned>(y)), y * 10.0f};
+        return v;
+    };
+    if (land_heights_.size() != terrain.heights.size() || land_light_.size() != terrain.lightmap.size())
+        return false;
+    // Changed grid points: a changed height sample (with its hole bit) or baked light.
+    int x0 = pitch, y0 = pitch, x1 = -1, y1 = -1;
+    const auto touch = [&](int x, int y) {
+        x0 = std::min(x0, x);
+        y0 = std::min(y0, y);
+        x1 = std::max(x1, x);
+        y1 = std::max(y1, y);
+    };
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            const auto sample = static_cast<std::size_t>(y) * size + x;
+            if (terrain.heights[sample] != land_heights_[sample]) {
+                touch(x, y);
+                // Terrain::raw: the extra column reads the next row's first sample, the extra row row 0.
+                if (!x)
+                    touch(size, y ? y - 1 : size);
+                if (!y)
+                    touch(x, size);
+                if (!x && !y)
+                    touch(size, size - 1);
+            }
+            if (terrain.lightmap[sample] != land_light_[sample]) {
+                touch(x, y);
+                touch(x == size - 1 ? size : x, y == size - 1 ? size : y); // Copied into the extra row/column.
+            }
+        }
+    land_heights_ = terrain.heights;
+    land_light_ = terrain.lightmap;
+    if (x1 >= x0) {
+        lod->update(terrain, x0, y0, x1, y1);
+        // Normals read the neighbouring samples; the last row and column repeat the ones before them.
+        const int gx1 = std::min(x1 + 1, size), gy1 = std::min(y1 + 1, size);
+        for (int y = std::max(y0 - 1, 0); y <= gy1; ++y)
+            for (int x = std::max(x0 - 1, 0); x <= gx1; ++x)
+                lod_grid[static_cast<std::size_t>(y) * pitch + x] = grid_point(x, y);
+        if (gx1 == size - 1)
+            for (int y = std::max(y0 - 1, 0); y <= gy1; ++y)
+                lod_grid[static_cast<std::size_t>(y) * pitch + size] = grid_point(size, y);
+        if (gy1 == size - 1)
+            for (int x = std::max(x0 - 1, 0); x <= gx1; ++x)
+                lod_grid[static_cast<std::size_t>(size) * pitch + x] = grid_point(x, size);
+        // A point reaches the cells on both sides of it, and grass blends one cell further.
+        invalidate_cells(x0 - 2, y0 - 2, x1 + 1, y1 + 1, false);
+    }
+    const auto [cx0, cy0, cx1, cy1] = refresh_cells(terrain, {});
+    if (cx1 >= cx0)
+        invalidate_cells(cx0 - 1, cy0 - 1, cx1 + 1, cy1 + 1, true);
+    return true;
 }
 namespace {
 Vec3 unpack_rgb(std::uint32_t c) {
@@ -584,10 +725,11 @@ bool TerrainView::update(const Camera& camera, float half_width, float half_heig
                                         s.range);
         for (unsigned i = 0; i < 6; ++i) {
             const auto& w = land.windows[i];
-            if (!composed_valid || w.x != composed[i].x || w.y != composed[i].y)
+            if (!composed_valid || recompose_[i] || w.x != composed[i].x || w.y != composed[i].y)
                 compose_window(i, w);
             composed[i] = w;
         }
+        recompose_.fill(false);
         composed_valid = true;
         const unsigned pitch = lod->size + 1;
         lod_faces.clear();

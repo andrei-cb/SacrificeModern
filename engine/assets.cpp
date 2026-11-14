@@ -238,23 +238,25 @@ bool Terrain::main_diagonal(unsigned x, unsigned y) const {
         return ((raw(x1, y) | raw(x, y1)) & 0x8000) != 0;
     return ((raw(x, y) | raw(x1, y1)) & 0x8000) == 0;
 }
+Vertex Terrain::grid_vertex(unsigned x, unsigned y) const {
+    Vertex v;
+    // Original coordinates are X/Y horizontal and Z up; renderer uses Y up.
+    v.position = {x * 10.0f, at(x, y), y * 10.0f};
+    v.uv = {static_cast<float>(x) / (width - 1), 1.0f - static_cast<float>(y) / (height - 1)};
+    const auto light = lightmap[static_cast<std::size_t>(y) * width + x];
+    v.color = 0xff000000u | ((light & 0xff) << 16) | (light & 0xff00) | ((light >> 16) & 0xff);
+    auto x0 = x ? x - 1 : 0, x1 = std::min(x + 1, width - 1), y0 = y ? y - 1 : 0, y1 = std::min(y + 1, height - 1);
+    const float dx = at(x1, y) - at(x0, y), dz = at(x, y1) - at(x, y0);
+    float len = std::sqrt(dx * dx + 400 + dz * dz);
+    v.normal = {-dx / len, 20.0f / len, -dz / len};
+    return v;
+}
 Mesh Terrain::mesh(bool tiled) const {
     Mesh m;
     m.vertices.resize(static_cast<std::size_t>(width) * height);
     for (unsigned y = 0; y < height; ++y)
-        for (unsigned x = 0; x < width; ++x) {
-            auto& v = m.vertices[static_cast<std::size_t>(y) * width + x];
-            // Original coordinates are X/Y horizontal and Z up; renderer uses Y up.
-            v.position = {x * 10.0f, at(x, y), y * 10.0f};
-            v.uv = {static_cast<float>(x) / (width - 1), 1.0f - static_cast<float>(y) / (height - 1)};
-            const auto light = lightmap[static_cast<std::size_t>(y) * width + x];
-            v.color = 0xff000000u | ((light & 0xff) << 16) | (light & 0xff00) | ((light >> 16) & 0xff);
-            auto x0 = x ? x - 1 : 0, x1 = std::min(x + 1, width - 1), y0 = y ? y - 1 : 0,
-                 y1 = std::min(y + 1, height - 1);
-            const float dx = at(x1, y) - at(x0, y), dz = at(x, y1) - at(x, y0);
-            float len = std::sqrt(dx * dx + 400 + dz * dz);
-            v.normal = {-dx / len, 20.0f / len, -dz / len};
-        }
+        for (unsigned x = 0; x < width; ++x)
+            m.vertices[static_cast<std::size_t>(y) * width + x] = grid_vertex(x, y);
     if (tiled) {
         auto grid = std::move(m.vertices);
         m.vertices.clear();
@@ -885,107 +887,130 @@ TerrainLod TerrainLod::build(const Terrain& terrain) {
     if (w != 1u << levels || terrain.height != w)
         return lod;
     lod.size = w;
-    // LAND's height buffer: rows of w samples followed by a copy of row 0 and its first sample.
+    lod.holes.resize(static_cast<std::size_t>(w + 1) * (w + 1));
+    lod.heights.resize(lod.holes.size());
+    for (unsigned level = 0; level < levels; ++level) {
+        const auto n = static_cast<std::size_t>(w >> level);
+        lod.flags[level].resize(n * n);
+        if (level)
+            lod.variance[level].resize(n * n);
+    }
+    lod.update(terrain, 0, 0, static_cast<int>(w), static_cast<int>(w));
+    return lod;
+}
+void TerrainLod::update(const Terrain& terrain, int x0, int y0, int x1, int y1) {
+    const unsigned w = size;
+    if (!w || terrain.width != w || terrain.height != w)
+        throw Error("Terrain LOD update for another map size");
+    const int last = static_cast<int>(w);
+    x0 = std::max(x0, 0);
+    y0 = std::max(y0, 0);
+    x1 = std::min(x1, last);
+    y1 = std::min(y1, last);
+    if (x1 < x0 || y1 < y0)
+        return;
+    const unsigned pitch = w + 1;
+    // Grid points (x, y <= w) as LAND's height buffer holds them: rows of w samples followed by a copy of row
+    // 0 and its first sample, so x == w is the next row's first sample (Terrain::raw).
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x) {
+            const auto point = static_cast<std::size_t>(y) * pitch + x;
+            holes[point] = static_cast<std::uint8_t>(terrain.raw(x, y) >> 15);
+            heights[point] = terrain.at(x, y);
+        }
+    // Each value below reads a bounded neighbourhood of grid points, so only the cells and blocks within
+    // reach of the changed rectangle are computed again; a full rectangle is the whole build.
     const auto height = [&](long long index) {
         if (index < 0 || index > static_cast<long long>(w) * (w + 1))
             throw Error("Variance sample outside height buffer");
-        auto x = static_cast<unsigned>(index % w), y = static_cast<unsigned>(index / w);
+        auto x = static_cast<unsigned>(index) & (w - 1), y = static_cast<unsigned>(index) >> (levels); // w = 2^levels.
         if (y > w) {
             x += w;
             --y;
         }
-        return terrain.at(x, y);
+        return heights[static_cast<std::size_t>(y) * pitch + x];
     };
     // UpdateEdgeMipMaps: per cell, bit 0 when any corner is a hole and bit 1 when two or more are; coarser
-    // levels OR bit 0 and AND bit 1 over their four children.
-    lod.flags[0].resize(static_cast<std::size_t>(w) * w);
-    for (unsigned y = 0; y < w; ++y)
-        for (unsigned x = 0; x < w; ++x) {
-            const unsigned holes = (terrain.raw(x, y) >> 15) + (terrain.raw(x + 1, y) >> 15) +
-                                   (terrain.raw(x, y + 1) >> 15) + (terrain.raw(x + 1, y + 1) >> 15);
-            lod.flags[0][static_cast<std::size_t>(y) * w + x] =
-                static_cast<std::uint8_t>((holes ? 1 : 0) | (holes > 1 ? 2 : 0));
-        }
-    for (unsigned level = 1; level < levels; ++level) {
-        const unsigned n = w >> level, child = n * 2;
-        auto& out = lod.flags[level];
-        const auto& in = lod.flags[level - 1];
-        out.resize(static_cast<std::size_t>(n) * n);
-        for (unsigned y = 0; y < n; ++y)
-            for (unsigned x = 0; x < n; ++x) {
-                const auto* c = &in[static_cast<std::size_t>(2 * y) * child + 2 * x];
-                const std::uint8_t a = c[0], b = c[1], d = c[child], e = c[child + 1];
-                out[static_cast<std::size_t>(y) * n + x] =
-                    static_cast<std::uint8_t>(((a | b | d | e) & 1) | (a & b & d & e & 2));
+    // levels OR bit 0 and AND bit 1 over their four children. A cell reads its four corners.
+    {
+        const int cx0 = std::max(x0 - 1, 0), cy0 = std::max(y0 - 1, 0), cx1 = std::min(x1, last - 1),
+                  cy1 = std::min(y1, last - 1);
+        for (int y = cy0; y <= cy1; ++y)
+            for (int x = cx0; x <= cx1; ++x) {
+                const auto corner = [&](int dx, int dy) {
+                    return holes[static_cast<std::size_t>(y + dy) * pitch + x + dx];
+                };
+                const unsigned count = corner(0, 0) + corner(1, 0) + corner(0, 1) + corner(1, 1);
+                flags[0][static_cast<std::size_t>(y) * w + x] =
+                    static_cast<std::uint8_t>((count ? 1 : 0) | (count > 1 ? 2 : 0));
             }
+        for (unsigned level = 1; level < levels; ++level) {
+            const unsigned n = w >> level, child = n * 2;
+            auto& out = flags[level];
+            const auto& in = flags[level - 1];
+            for (int y = cy0 >> level; y <= cy1 >> level; ++y)
+                for (int x = cx0 >> level; x <= cx1 >> level; ++x) {
+                    const auto* c = &in[static_cast<std::size_t>(2 * y) * child + 2 * x];
+                    const std::uint8_t a = c[0], b = c[1], d = c[child], e = c[child + 1];
+                    out[static_cast<std::size_t>(y) * n + x] =
+                        static_cast<std::uint8_t>(((a | b | d | e) & 1) | (a & b & d & e & 2));
+                }
+        }
     }
-    lod.holes.resize(static_cast<std::size_t>(w + 1) * (w + 1));
-    for (unsigned y = 0; y <= w; ++y)
-        for (unsigned x = 0; x <= w; ++x)
-            lod.holes[static_cast<std::size_t>(y) * (w + 1) + x] =
-                static_cast<std::uint8_t>(terrain.raw(x, y) >> 15);
-    lod.heights.resize(lod.holes.size());
-    for (unsigned y = 0; y <= w; ++y)
-        for (unsigned x = 0; x <= w; ++x)
-            lod.heights[static_cast<std::size_t>(y) * (w + 1) + x] =
-                height(static_cast<long long>(y) * w + x);
-    // UpdateVariance, including the terms where the original reads one endpoint twice.
+    // UpdateVariance, including the terms where the original reads one endpoint twice. A level's block
+    // (bx, by) starts at grid point (2h bx, 2h by), h = 2^(level - 1), and reads points up to 2h away.
     const auto full = [&](long long s, long long k) {
         return std::fabs(height(s) - (height(s + 2 * k) + height(s + k)) * 0.5f);
     };
     const auto twice = [&](long long s, long long k) { return std::fabs(height(s) - height(s + 2 * k)); };
     const long long W = w;
-    {
-        const unsigned n = w >> 1;
-        auto& out = lod.variance[1];
-        out.resize(static_cast<std::size_t>(n) * n);
-        for (unsigned by = 0; by < n; ++by)
-            for (unsigned bx = 0; bx < n; ++bx) {
-                const long long s = 2ll * bx + 2ll * by * W;
-                float v = full(s, twice(s, W) >= twice(s, 1) ? W : 1);
-                v = std::max(v, full(s, W + 1));
-                if (bx) {
-                    v = std::max(v, full(s, -1));
-                    v = std::max(v, full(s, W - 1));
-                    if (by)
-                        v = std::max(v, full(s, -W - 1));
-                }
-                if (by) {
-                    v = std::max(v, full(s, -W));
-                    v = std::max(v, full(s, 1 - W));
+    for (unsigned level = 1; level < levels; ++level) {
+        const unsigned n = w >> level, child = n * 2;
+        const int span = 1 << level; // 2h.
+        const int bx0 = std::max(x0 / span - 1, 0), by0 = std::max(y0 / span - 1, 0),
+                  bx1 = std::min(x1 / span + 1, static_cast<int>(n) - 1),
+                  by1 = std::min(y1 / span + 1, static_cast<int>(n) - 1);
+        auto& out = variance[level];
+        for (int by = by0; by <= by1; ++by)
+            for (int bx = bx0; bx <= bx1; ++bx) {
+                float v;
+                if (level == 1) {
+                    const long long s = 2ll * bx + 2ll * by * W;
+                    v = full(s, twice(s, W) >= twice(s, 1) ? W : 1);
+                    v = std::max(v, full(s, W + 1));
+                    if (bx) {
+                        v = std::max(v, full(s, -1));
+                        v = std::max(v, full(s, W - 1));
+                        if (by)
+                            v = std::max(v, full(s, -W - 1));
+                    }
+                    if (by) {
+                        v = std::max(v, full(s, -W));
+                        v = std::max(v, full(s, 1 - W));
+                    }
+                } else {
+                    // LAND::CalculateVariance 0x1603d0b0.
+                    const long long h = 1ll << (level - 1);
+                    const long long s = 2 * h * bx + 2 * h * W * by;
+                    const long long pick = full(s, W * h) >= full(s, h) ? W * h : h;
+                    v = twice(s, pick);
+                    v = std::max(v, twice(s, W * h + h));
+                    if (bx) {
+                        v = std::max(v, full(s, -h));
+                        v = std::max(v, full(s, W * h - h));
+                        if (by)
+                            v = std::max(v, full(s, -W * h - h));
+                    }
+                    if (by) {
+                        v = std::max(v, twice(s, -W * h));
+                        v = std::max(v, full(s, h - W * h));
+                    }
+                    const auto* c = &variance[level - 1][static_cast<std::size_t>(2 * by) * child + 2 * bx];
+                    v = std::max({v, std::max(c[0], c[1]), std::max(c[child], c[child + 1])});
                 }
                 out[static_cast<std::size_t>(by) * n + bx] = v;
             }
     }
-    for (unsigned level = 2; level < levels; ++level) {
-        const unsigned n = w >> level, child = n * 2;
-        const long long h = 1ll << (level - 1);
-        auto& out = lod.variance[level];
-        const auto& in = lod.variance[level - 1];
-        out.resize(static_cast<std::size_t>(n) * n);
-        for (unsigned by = 0; by < n; ++by)
-            for (unsigned bx = 0; bx < n; ++bx) {
-                // LAND::CalculateVariance 0x1603d0b0.
-                const long long s = 2 * h * bx + 2 * h * W * by;
-                const long long pick = full(s, W * h) >= full(s, h) ? W * h : h;
-                float v = twice(s, pick);
-                v = std::max(v, twice(s, W * h + h));
-                if (bx) {
-                    v = std::max(v, full(s, -h));
-                    v = std::max(v, full(s, W * h - h));
-                    if (by)
-                        v = std::max(v, full(s, -W * h - h));
-                }
-                if (by) {
-                    v = std::max(v, twice(s, -W * h));
-                    v = std::max(v, full(s, h - W * h));
-                }
-                const auto* c = &in[static_cast<std::size_t>(2 * by) * child + 2 * bx];
-                out[static_cast<std::size_t>(by) * n + bx] =
-                    std::max({v, std::max(c[0], c[1]), std::max(c[child], c[child + 1])});
-            }
-    }
-    return lod;
 }
 TerrainLod::View TerrainLod::classify(const Camera& camera, float range) const {
     View view;

@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <unordered_map>
+#include <utility>
 namespace sacrifice::renderer_shared {
 struct ParticleRange {
     const ParticleBatch* batch;
@@ -138,7 +139,18 @@ struct TerrainView {
     std::array<std::vector<std::uint32_t>, 6> window_pixels;
     std::array<bool, 6> window_dirty{};
     void reset(const Terrain& terrain);
-    void update_tiles(const TerrainMaterials& materials, const Terrain& terrain);
+    // Copies the tile layers' mips. `full` rebuilds every layer and drops all cached grass and windows (a new
+    // tile set); otherwise only the scar layers (256 and up) whose mips changed are copied, and only the
+    // cells whose layer changed, or whose scar layer was redrawn, lose their grass and window texels.
+    // Returns the layers it rewrote, for the backend's texture array.
+    std::vector<std::size_t> update_tiles(const TerrainMaterials& materials, const Terrain& terrain,
+                                          bool full = true);
+    // After the match edits the land (heights, holes, tiles; Match::terrain_revision): re-reads it and redoes
+    // only what changed points touch (the LOD, those grid vertices, nearby grass cells, the land faces).
+    // False when there is no LOD or the map size changed; reset() is needed then.
+    bool refresh(const Terrain& terrain);
+    // Static grass chunk keys (cy * 65536 + cx) whose cells changed; backends caching chunks drop these.
+    std::vector<std::int64_t> take_dirty_grass_chunks() { return std::exchange(dirty_grass_chunks_, {}); }
     // Remastered grass layer (drawing only): blades on grassy ground within tuning::grass_range of the camera,
     // as triangles (foliage vertices with the ground's baked light). Empty without a land view.
     void grass(const Terrain& terrain, const Camera& camera, std::vector<Vertex>& vertices,
@@ -188,6 +200,17 @@ struct TerrainView {
     std::vector<Vec3> clearings_;
     float clearing(float x, float y) const; // 0 inside a clearing, rising to 1 just outside.
     unsigned grass_generation_{};
+    std::vector<std::int64_t> dirty_grass_chunks_;
+    std::array<bool, 6> recompose_{};                  // Windows to compose again at the next rebuild.
+    std::vector<std::vector<std::uint32_t>> scar_top_; // Scar layers' full-size mip, to spot redrawn scars.
+    std::vector<std::uint16_t> land_heights_;          // Terrain heights and light the view was built from.
+    std::vector<std::uint32_t> land_light_;
+    // Drops the grass of map cells [x0, x1] x [y0, y1] and rebuilds the faces over them; `layers` (their
+    // tiles changed) also composes the texture windows over them again.
+    void invalidate_cells(int x0, int y0, int x1, int y1, bool layers);
+    // Re-reads cell layers from `terrain`; `redrawn` marks scar layers whose texels changed. Returns the
+    // changed cells' bounds (x0, y0, x1, y1), x1 < x0 when none changed.
+    std::array<int, 4> refresh_cells(const Terrain& terrain, const std::vector<bool>& redrawn);
     const std::vector<Blade>& grass_cell(const Terrain& terrain, int cx, int cy);
     void prepare_grass(); // Classifies the tile layers (tile_grass_, tile_colour_) once per tile set.
     // One tuft or clutter item scaled by `grow`; `encode` stores the root and rank for the shader.
