@@ -48,6 +48,7 @@ float approach(float& angle, float target, float step) {
     angle = wrap(angle + step);
     return -(step + difference);
 }
+} // namespace
 // The cubic Bezier of 0x47fca0 over the control points at 0x4d23d0 with the basis at 0x4caf80.
 std::array<float, 3> follow_curve(float t) {
     static constexpr std::array<std::array<float, 3>, 4> points{
@@ -60,6 +61,7 @@ std::array<float, 3> follow_curve(float t) {
             result[c] += points[i][c] * weights[i];
     return result;
 }
+namespace {
 // 0x44ecd0: LAND::GetTrueHeight, zero outside the map but the plane height over holes, so the camera does not
 // drop under the land beside a void edge.
 float ground(const Terrain& terrain, float x, float y) {
@@ -227,17 +229,18 @@ void FollowCamera::update(CreatureActor& target, const Terrain& terrain, int tic
     place(target, terrain, {target.view_yaw, target.view_pitch});
 }
 void FollowCamera::place(const CreatureActor& target, const Terrain& terrain, Vec2 angles) {
+    // Native SAXS branch: GetCameraOffset, not animated world bounds.
+    place(target.motion.position, target.camera_offset(), terrain, angles);
+}
+void FollowCamera::place(Vec3 target, Vec2 offset, const Terrain& terrain, Vec2 angles) {
     // 0x47fca0: behind the target along the given yaw, scaled by the body extent.
-    const auto& motion = target.motion;
-    const auto offset = target.camera_offset(); // Native SAXS branch: GetCameraOffset, not animated world bounds.
     const auto curve = follow_curve(zoom);
     const float distance = curve[0] * offset.x, height = curve[1] * offset.y * height_scale;
     yaw = angles.x;
     pitch = curve[2] + angles.y;
-    position = {motion.position.x + std::sin(yaw) * distance, motion.position.y - std::cos(yaw) * distance,
-                motion.position.z + height};
+    position = {target.x + std::sin(yaw) * distance, target.y - std::cos(yaw) * distance, target.z + height};
     // Keep the camera's height over the land within 0.75..1.25 of the nominal offset.
-    const float lift = motion.position.z - ground(terrain, motion.position.x, motion.position.y);
+    const float lift = target.z - ground(terrain, target.x, target.y);
     const float above = position.z - ground(terrain, position.x, position.y) - lift;
     const float low = height * .75f, high = height * 1.25f;
     if (above < low || above > high) {

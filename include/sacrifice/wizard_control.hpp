@@ -82,5 +82,10 @@ class FollowCamera {
     void update(CreatureActor& target, const Terrain& terrain, int ticks, std::uint32_t held, bool local);
     // 0x47fca0 / 0x47fc30 also place a cinematic eye behind an object, facing the scripted aim.
     void place(const CreatureActor& target, const Terrain& terrain, Vec2 angles);
+    // The same placement behind a point with explicit (distance, height) dimensions: the SAXS camera offset,
+    // or for other models a radius of |bounds min XY| + 1 and 0.9 of the bounds' height.
+    void place(Vec3 target, Vec2 offset, const Terrain& terrain, Vec2 angles);
 };
+// 0x47fca0's cubic Bezier at a zoom: distance and height factors, then the pitch offset.
+std::array<float, 3> follow_curve(float zoom);
 } // namespace sacrifice

@@ -1,7 +1,9 @@
 #pragma once
 #include "sacrifice/renderer.hpp"
+#include "sacrifice/scene.hpp"
 #include "sacrifice/trigger.hpp"
 #include "sacrifice/wizard_control.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
@@ -44,6 +46,14 @@ inline void cinematic_view(const Triggers& triggers, Camera& camera, FollowCamer
         camera.pitch = std::atan2(dz, std::sqrt(dx * dx + dy * dy));
     }
     reset_follow(follow);
+    // One view zoom (+220 / +224) runs through the scene: play resumes at the zoom the scene left.
+    follow.zoom = triggers.camera_zoom;
+    follow.zoom_target = triggers.camera_zoom_target;
+}
+// Outside a cinematic the script's zoom is the follow camera's, so an object eye placed at the scene's
+// start (0x47fca0 with +220) matches the view the player had.
+inline void seed_script_zoom(Triggers& triggers, const FollowCamera& follow) {
+    triggers.seed_zoom(follow.zoom, follow.zoom_target);
 }
 // The follow camera behind the local wizard for `ticks`, taking a scripted zoom (action 121) when the
 // script changes it.
@@ -58,6 +68,54 @@ inline void follow_view(FollowCamera& follow, CreatureActor& wizard, const Terra
     camera.yaw = -follow.yaw;
     camera.pitch = follow.pitch;
 }
+// Leaving a scene whose eye is not on the wizard (0x453450 -> 0x47f2c0, camera mode 1, flags 0x55) blends
+// the view back over clamp(0.002 x distance to the wizard, 0.2, 1) seconds, eased by 0x43a240 and kept 0.5
+// over the land (0x44df50). When the eye ended on the wizard, 0x480190 turns its view angles instead
+// (Triggers) and there is no blend.
+// Port repair: natively mode 1 aims at the wizard itself (0x47f110 with it), so 0x47f9e0's yaw from the aim
+// to the wizard is 0 and the eye heads for a point south of it, then mode 0 cuts to the follow view. Here the
+// blend runs from the scene's view to the follow view, so it ends where play continues.
+struct SceneExitBlend {
+    std::optional<Camera> scene; // The last scene view, while its eye was away from the wizard.
+    std::uint32_t scene_tick{};
+    Camera start;
+    float progress{1}, seconds{1};
+    void watch(const Triggers& triggers, const Camera& camera, std::uint32_t wizard, std::uint32_t tick) {
+        if (triggers.camera_eye.object != wizard) {
+            scene = camera;
+            scene_tick = tick;
+        } else
+            scene.reset();
+    }
+    // After follow_view: blends `camera` (the follow view) from the scene's last view.
+    void apply(Camera& camera, const CreatureActor& wizard, const Terrain& terrain, std::uint32_t tick, int ticks) {
+        if (scene) {
+            if (tick >= scene_tick && tick - scene_tick <= 12) {
+                start = *scene;
+                const auto& p = wizard.motion.position;
+                const float dx = start.position.x - p.x, dy = start.position.z - p.y, dz = start.position.y - p.z;
+                seconds = std::clamp(std::sqrt(dx * dx + dy * dy + dz * dz) * .002f, .2f, 1.0f);
+                progress = 0;
+            }
+            scene.reset();
+        }
+        if (progress >= 1)
+            return;
+        progress = std::min(1.0f, progress + static_cast<float>(ticks) / (seconds * 60));
+        if (progress >= 1)
+            return;
+        const float t = ((-1.4f * progress + 2.1f) * progress + .3f) * progress;
+        const auto mix = [t](float a, float b) { return a + (b - a) * t; };
+        Camera blended = camera;
+        blended.position = {mix(start.position.x, camera.position.x), mix(start.position.y, camera.position.y),
+                            mix(start.position.z, camera.position.z)};
+        const float floor = terrain_height(terrain, blended.position.x, blended.position.z, true) + .5f;
+        blended.position.y = std::max(blended.position.y, floor);
+        blended.yaw = start.yaw + std::remainder(camera.yaw - start.yaw, 2 * std::numbers::pi_v<float>) * t;
+        blended.pitch = mix(start.pitch, camera.pitch);
+        camera = blended;
+    }
+};
 // Presentation only (not native): the tick-driven view (follow camera or cinematic) is drawn between its
 // pose before the last match tick and its current pose, by Match::presentation_blend, so it moves smoothly
 // on displays faster than the 60 Hz tick. Free and inspector cameras pass through.

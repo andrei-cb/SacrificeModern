@@ -112,6 +112,8 @@ class Triggers {
     std::function<float(FourCC)> sample_seconds;
     void bind_presentation(const ResourceCatalog& catalog);
     void seed_camera(Vec3 eye, Vec3 aim);
+    // Outside a cinematic the scripted zoom is the view's own (+220 / +224), as the player left it.
+    void seed_zoom(float zoom, float target);
     void dismiss_dialogue(bool force = false); // Force also advances a timed cinematic line.
     std::int32_t game_timer{};
     bool timer_visible{};
@@ -198,6 +200,8 @@ class Triggers {
     void advance_presentation();
     void move_camera(CameraTrack& track, const Location& where, unsigned ticks);
     Vec3 camera_object(const MatchObject& object, bool eye) const;
+    std::uint32_t camera_target() const;
+    std::uint32_t cinematic_target_{}; // +4593: the view's followed object when the scene began.
     std::vector<Variable> variables_;
     Variable& variable(Instance& instance);                            // 0x4777d0.
     std::int32_t& value(Variable& variable, const Instance& instance); // Flag 4 indexes the side.

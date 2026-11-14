@@ -255,6 +255,7 @@ struct Inspector {
     KeyboardDevice keyboard;
     FollowCamera follow = playing_follow();
     CameraBlend camera_blend; // Drawn view between ticks.
+    SceneExitBlend exit_blend; // Mode 1 back to the follow view after a scene.
     CameraShake shake;
     CrtRandom shake_random; // Stands in for the shared rand() of 0x47fbb0.
     bool third_person{true}, keyboard_engaged{}, dragging{};
@@ -931,8 +932,11 @@ struct Inspector {
         auto* match = simulation ? &simulation->match() : nullptr;
         if (match)
             match->direct_control_target = in_cutscene() ? nullptr : local_wizard();
-        if (simulation)
+        if (simulation) {
             seed_script_camera(simulation->triggers(), camera);
+            if (local_wizard())
+                seed_script_zoom(simulation->triggers(), follow);
+        }
         const auto ticks = match ? (step ? match->tick(*step) : match->advance(dt * 60.0f))
                                  : (step ? *step : sky_clock.advance(dt * 60.0f));
         frame_ticks = ticks;
@@ -1424,6 +1428,8 @@ struct Inspector {
             minimap_drag.reset();
             left_world = dragging = minimap_box = false;
             cinematic_view(triggers, camera, follow); // Leaving it restarts the follow camera at the wizard.
+            if (const auto* wizard = local_wizard())
+                exit_blend.watch(triggers, camera, wizard->reference(), simulation->match().clock().match);
         }
     }
     void script_overlay(unsigned width, unsigned height, Renderer& renderer) {
@@ -1571,6 +1577,7 @@ struct Inspector {
                            input.pointer_inside);
         follow_view(follow, *wizard, terrain, simulation->triggers(), script_zoom_revision, frame_ticks,
                     keyboard.held(), camera);
+        exit_blend.apply(camera, *wizard, terrain, simulation->match().clock().match, frame_ticks);
         return true;
     }
     bool over_gameplay_hud(Vec2 point, unsigned width, unsigned height) const {
@@ -2300,6 +2307,7 @@ struct Inspector {
             third_person = true;
             show_inspector = false;
             reset_follow(follow);
+            exit_blend = {};
             place_campaign_camera(0); // Seed the playing view before a first-tick cinematic takes it.
         });
 
@@ -2999,6 +3007,7 @@ struct Inspector {
                 attempt([&] { load(mission, renderer); });
                 third_person = true;
                 reset_follow(follow);
+                exit_blend = {};
             });
             return;
         }

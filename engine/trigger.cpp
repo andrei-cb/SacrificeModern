@@ -197,6 +197,12 @@ void Triggers::seed_camera(Vec3 eye, Vec3 aim) {
         camera_eye.object = camera_aim.object = 0;
     }
 }
+void Triggers::seed_zoom(float zoom, float target) {
+    if (!cinematic_) {
+        camera_zoom = zoom;
+        camera_zoom_target = target;
+    }
+}
 void Triggers::move_camera(CameraTrack& track, const Location& where, unsigned ticks) {
     track.start = track.point;
     track.elapsed = 0;
@@ -214,24 +220,35 @@ Vec3 Triggers::camera_object(const MatchObject& object, bool eye) const {
     const auto* motion = object.source_motion();
     if (!motion)
         return eye ? camera_eye.target : camera_aim.target;
-    if (const auto* actor = dynamic_cast<const CreatureActor*>(&object)) {
-        if (eye && match_->terrain) {
-            FollowCamera view;
-            view.zoom = camera_zoom;
-            const auto dx = camera_aim.point.x - motion->position.x,
-                       dy = camera_aim.point.y - motion->position.y;
-            view.place(*actor, *match_->terrain, {-std::atan2(dx, dy), 0});
-            return view.position;
-        }
-        if (!eye && actor->camera_offset().y > 0) {
-            auto point = motion->position;
-            point.z += actor->camera_offset().y * .5f; // 0x47f950.
-            return point;
-        }
+    const auto* actor = dynamic_cast<const CreatureActor*>(&object);
+    if (eye && match_->terrain) {
+        // 0x47f9e0 (mode flag 0x40): behind the object along the yaw from it to the aim, pitch 0 (0x410920).
+        FollowCamera view;
+        view.zoom = camera_zoom;
+        const auto dx = camera_aim.point.x - motion->position.x, dy = camera_aim.point.y - motion->position.y;
+        const Vec2 angles{dx == 0 && dy == 0 ? 0.0f : -std::atan2(dx, dy), 0};
+        if (actor)
+            view.place(*actor, *match_->terrain, angles);
+        else // 0x47fca0 without a SAXS model: the model bounds give the distance and height.
+            view.place(motion->position,
+                       {std::hypot(motion->box_min.x, motion->box_min.y) + 1, (motion->box_max.z - motion->box_min.z) * .9f},
+                       *match_->terrain, angles);
+        return view.position;
     }
+    if (!eye && actor && actor->camera_offset().y > 0) {
+        auto point = motion->position;
+        point.z += actor->camera_offset().y * .5f; // 0x47f950.
+        return point;
+    }
+    // 0x47f950 otherwise aims at 0x44e020: the collision boxes' centre, or the visual bounds' centre.
     auto point = motion->position;
-    point.z += (motion->box_min.z + motion->box_max.z) * .5f;
+    spell_target_point(point, &object);
     return point;
+}
+std::uint32_t Triggers::camera_target() const {
+    // The view's followed object (+124): the local wizard, dword_4dabb0.
+    const auto* wizard = match_ && match_->local_side ? match_->local_side->wizard() : nullptr;
+    return wizard ? wizard->reference() : 0;
 }
 void Triggers::dismiss_dialogue(bool force) {
     const auto recording =
@@ -292,10 +309,21 @@ void Triggers::advance_presentation() {
         if (const auto* object = match_->resolve(track->object))
             track->target = camera_object(*object, track == &camera_eye);
         track->elapsed += ticks;
-        const float t = track->duration > 0 ? std::min(track->elapsed / track->duration, 1.0f) : 1;
+        const float progress = track->duration > 0 ? std::min(track->elapsed / track->duration, 1.0f) : 1;
+        // 0x47f390 eases both tracks by 0x43a240: the cubic Bezier over 0, 0.1, 0.9, 1 (0x4d2400) with the
+        // basis at 0x4caf80, -1.4t^3 + 2.1t^2 + 0.3t.
+        const float t = progress >= 1 ? 1 : ((-1.4f * progress + 2.1f) * progress + .3f) * progress;
         track->point = {track->start.x + (track->target.x - track->start.x) * t,
                         track->start.y + (track->target.y - track->start.y) * t,
                         track->start.z + (track->target.z - track->start.z) * t};
+    }
+    // Mode flag 0x10 then keeps the eye half a unit over the land (0x44df50 with 0x44ecd0), so markers at
+    // or below ground height (ch, et, py01 and pe01 use heights 0, -5 and -10) stay above it.
+    if (match_->terrain) {
+        auto& eye = camera_eye.point;
+        const float floor = terrain_height(*match_->terrain, eye.x, eye.y, true) + .5f;
+        if (eye.z < floor)
+            eye.z = floor;
     }
     const auto advance = [&](std::deque<Dialogue>& queue, bool parallel = false) {
         for (auto it = queue.begin(); it != queue.end();) {
@@ -1497,10 +1525,36 @@ bool Triggers::action(MatchSide& side, Instance& instance) {
         return false;
     }
     case tc::ActionCinematicsStart: // 0x453450: cinematic mode on / off.
-    case tc::ActionCinematicsEnd:
-        cinematic_ = code == tc::ActionCinematicsStart;
+    case tc::ActionCinematicsEnd: {
+        const bool enabled = code == tc::ActionCinematicsStart;
+        if (enabled != cinematic_) {
+            if (enabled) {
+                // Mode 2 starts with the aim held 50 units along the view (0x47f110, seeded by the host) and
+                // the eye on the view's followed object at once (0x47f220), so it stays behind the wizard
+                // while the script walks it until the eye is moved.
+                cinematic_target_ = camera_target();
+                camera_eye.start = camera_eye.point;
+                camera_eye.elapsed = camera_eye.duration = 0;
+                camera_eye.object = cinematic_target_;
+                if (const auto* target = match_->resolve(cinematic_target_))
+                    camera_eye.point = camera_eye.target = camera_object(*target, true);
+            } else if (cinematic_target_ && camera_eye.object == cinematic_target_) {
+                // 0x47f2c0 refuses a view already on the wizard, so 0x480190 turns the wizard's view angles
+                // (+744 / +748) to the scene's direction, less the zoom's pitch: play resumes looking the
+                // same way.
+                if (auto* wizard = dynamic_cast<CreatureActor*>(match_->resolve(cinematic_target_))) {
+                    const Vec3 forward{camera_aim.point.x - camera_eye.point.x, camera_aim.point.y - camera_eye.point.y,
+                                       camera_aim.point.z - camera_eye.point.z};
+                    const float flat = std::hypot(forward.x, forward.y);
+                    wizard->view_yaw = flat == 0 ? 0.0f : std::atan2(-forward.x, forward.y);
+                    wizard->view_pitch = (forward.z == 0 ? 0.0f : std::atan2(forward.z, flat)) - follow_curve(camera_zoom)[2];
+                }
+            }
+        }
+        cinematic_ = enabled;
         match_->set_cinematic(cinematic_);
         return true;
+    }
     case tc::ActionSetViewZoomLevel: { // View +224: 122..126 give 0, 0.25, 0.5, 0.75, 1.
         const auto level = next(instance);
         if (level < tc::ZoomLevelClosest || level > tc::ZoomLevelFarthest)
