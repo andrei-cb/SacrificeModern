@@ -4,6 +4,7 @@
 #include "sacrifice/spell_combat.hpp"
 #include "sacrifice/spell_registry.hpp"
 #include <cmath>
+#include <utility>
 
 namespace sacrifice {
 namespace {
@@ -117,6 +118,7 @@ void CreatureActor::execute_orders(Match& match) {
     }
     const auto order = orders.current();
     auto* target = order.target;
+    const bool settled = std::exchange(follow_settled, false);
     switch (order.kind) {
     case 1:
     case 2:
@@ -128,10 +130,29 @@ void CreatureActor::execute_orders(Match& match) {
     case 5:
         if (target && target != this && (target->kind_flags & 0x1f) && target->source_motion()) {
             const Vec3 point = order.formation ? order.point : target->source_motion()->position;
-            if (approach_order(match, point,
-                               order.formation ? .5f : radius(match, *target->source_motion()) + 10,
-                               order.yaw, order.formation ? .087266386f : 0))
+            const float arrive = order.formation ? .5f : radius(match, *target->source_motion()) + 10;
+            const float face = order.formation ? .087266386f : 0;
+            // Port repair: natively an arrived follower re-steers as soon as its point is past `arrive`. A
+            // leader creeping slowly (a wizard pushed by the manalith field, 0x44d9a0) then keeps it at
+            // that edge, flipping between run and stand every few ticks. Once arrived it holds until the
+            // point is a unit further out.
+            if (settled && network_identity && !(state_flags & 0x80000)) {
+                const double dx = static_cast<double>(point.x) - motion.position.x,
+                             dy = static_cast<double>(point.y) - motion.position.y,
+                             hold = static_cast<double>(arrive) + 1;
+                if (dx * dx + dy * dy < hold * hold) {
+                    if (face > 0)
+                        face_order_yaw(order.yaw);
+                    orders.pop(false);
+                    follow_settled = orders.kind() == order.kind && orders.target() == target;
+                    break;
+                }
+            }
+            const int result = approach_order(match, point, arrive, order.yaw, face);
+            if (result)
                 orders.pop(false);
+            follow_settled =
+                result > 0 && orders.kind() == order.kind && orders.target() == target;
         } else if (order.kind == 5)
             orders.rewrite(5, 4);
         else

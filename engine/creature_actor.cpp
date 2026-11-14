@@ -105,6 +105,7 @@ void CreatureActor::activated(Match& match) {
     path.clear(); // 0x458c20 zeroes the cache on activation.
     approach_blocker = nullptr;
     approach_result = 0;
+    follow_settled = false;
     if (spatial_)
         spatial_->unbind(motion);
     spatial_ = nullptr;

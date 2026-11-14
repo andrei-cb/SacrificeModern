@@ -172,6 +172,7 @@ class CreatureActor : public MatchObject {
     NavigationPath path;             // +2900, shared route nodes and obstruction/elapsed cache.
     MatchObject* approach_blocker{}; // +2928, cleared by negative reference events.
     int approach_result{};           // +2932, previous arrival/blocked result.
+    bool follow_settled{};           // Port repair: a follow/guard order has arrived (execute_orders).
     bool issue_order(const CreatureOrders::Input& input, int insertion = 0, bool marker_mode = false);
     bool issue_spell_order(FourCC id, MatchObject* target, std::optional<Vec3> point = {});
     bool find_summon_point(Match& match, Vec3& point) const;   // 0x458ae0.

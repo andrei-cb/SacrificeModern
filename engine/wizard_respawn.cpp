@@ -125,6 +125,7 @@ bool CreatureActor::relocate(Match& match, Vec3 point) {
     path.clear();
     approach_blocker = nullptr;
     approach_result = 0;
+    follow_settled = false;
     fade = 1;
     fade_target = 0;
     fade_step = std::bit_cast<float>(1015580809u);
