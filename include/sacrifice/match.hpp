@@ -169,6 +169,7 @@ class Match {
         return inactive_.at(group);
     }
     // 0x40a8a0 then 0x452700 / 0x4525d0 for `elapsed` 1/60 s ticks of real time; returns the ticks run.
+    // Frames that complete no whole tick do not update the match (port repair, see match.cpp).
     int advance(float elapsed);
     // The match update for whole ticks (after the main loop's truncation).
     int tick(int ticks);

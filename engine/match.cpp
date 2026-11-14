@@ -358,7 +358,13 @@ ObjectMotion Match::presented(const MatchObject& object) const {
     return result;
 }
 int Match::advance(float elapsed) {
-    return tick(clock_.advance(elapsed));
+    // Port repair: natively 0x40a8a0 also calls the match with 0 whole ticks whenever a frame is shorter
+    // than 1/60 s. Objects then rerun per-call checks without time passing: a clip just started at frame 0
+    // reads as finished (FSM event 2), so above 60 fps casts, summons and attacks were cut short and
+    // releases fired a frame early. Those updates are skipped; the view blends between ticks instead
+    // (presentation_blend), so the simulation is the same at any frame rate.
+    const int ticks = clock_.advance(elapsed);
+    return ticks > 0 ? tick(ticks) : 0;
 }
 int Match::tick(int ticks) {
     if (world_journal)
