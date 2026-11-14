@@ -206,11 +206,16 @@ void CreatureActor::activated(Match& match) {
             } else
                 attack_capabilities |= 0x20;
         }
-    // 0x458dd0 binds the serialized +124 run spell as the creature's initial behaviour.
+    // 0x458dd0 binds the serialized +124 run spell as the creature's initial behaviour (+476 = self, the
+    // spell's +278 function, +288 = the spell). Its first pass launches the creature's passive effect:
+    // abmh ManahoarManaRun, @gst GhostProc (ghst/ment ghosts), ghdt/ghft GunheadTorchRun, lfir
+    // RedDragonAbility, ftha FireTrollAbility, licg LightningChargeAbility, qrok QuadrokAbility.
     if (const auto id = resources_->definition.run_spell; id.value && match.spell_registry)
-        if (const auto* definition = match.spell_registry->find(id);
-            definition && definition->spell && definition->spell->run_id == spell_function_id("ManahoarManaRun"))
+        if (const auto* definition = match.spell_registry->find(id); definition && definition->spell) {
             initial_run_spell = definition->spell;
+            casting.definition = id;
+            casting.data = definition->spell;
+        }
     animation_multiplier = 1;
     motion = {};
     controls = {};
