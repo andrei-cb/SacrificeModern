@@ -864,6 +864,57 @@ struct Inspector {
     // one-tick capture step; normal playback takes variable whole ticks from the game clock.
     // --trace-ai: every five seconds of match time, one line per wizard (see docs/status.md).
     std::uint64_t trace_clock{}, trace_next{};
+    // Diagnostic (SACRIFICE_TRACE_ANIM=1): the local side's creatures within 60 of the wizard, one line
+    // whenever clip, FSM state, order or order target changes or the clip restarts, plus the wizard's own
+    // state. Written to anim_trace.log beside SacrificeModern.log.
+    struct AnimTrace {
+        std::string key;
+        float frame{};
+    };
+    std::unordered_map<const MatchObject*, AnimTrace> anim_trace;
+    std::unique_ptr<std::ofstream> anim_trace_file;
+    static bool trace_animation_enabled() {
+        static const bool enabled = GetEnvironmentVariableW(L"SACRIFICE_TRACE_ANIM", nullptr, 0) != 0;
+        return enabled;
+    }
+    void trace_animation(Match& match, int ticks) {
+        auto* wizard = local_wizard();
+        if (!wizard)
+            return;
+        if (!anim_trace_file) {
+            anim_trace_file = std::make_unique<std::ofstream>(application_data() / "anim_trace.log", std::ios::app);
+            *anim_trace_file << "=== trace start\n";
+        }
+        auto& out = *anim_trace_file;
+        const auto& w = wizard->motion.position;
+        for (const auto& object : match.objects()) {
+            auto* actor = dynamic_cast<CreatureActor*>(object.get());
+            if (!actor || actor->allegiance != wizard->allegiance || (actor->state_flags & MatchObject::removed_flag))
+                continue;
+            const auto& p = actor->motion.position;
+            const float dx = p.x - w.x, dy = p.y - w.y, distance = std::sqrt(dx * dx + dy * dy);
+            if (actor != wizard && distance > 60)
+                continue;
+            const auto* state = actor->fsm().state();
+            const auto order = actor->orders.current();
+            std::string key = std::format(
+                "{} clip {} state {} flags {:x} order {} target {}", actor->definition().id.text(),
+                actor->clip() ? actor->clip()->id.text() : "-", state ? state->id.text() : "-",
+                state ? state->flags : 0u, actor->orders.kind(),
+                order.target ? std::format("{}:{}", order.target->type, order.target->reference()) : "-");
+            auto& entry = anim_trace[actor];
+            const bool restarted = key == entry.key && actor->frame() + .001f < entry.frame;
+            if (key != entry.key || restarted)
+                out << std::format("t{} +{} #{} {}{} frame {:.2f} (was {:.2f}) pos {:.2f},{:.2f},{:.2f} yaw {:.3f} "
+                                   "dist {:.1f} controls {},{},{} flags {:x}\n",
+                                   match.clock().match, ticks, actor->reference(), restarted ? "RESTART " : "", key,
+                                   actor->frame(), entry.frame, p.x, p.y, p.z, actor->motion.yaw, distance,
+                                   actor->controls[0], actor->controls[1], actor->controls[2], actor->state_flags);
+            entry.key = std::move(key);
+            entry.frame = actor->frame();
+        }
+        out.flush();
+    }
     void trace_wizards(Match& match, int ticks) {
         trace_clock += static_cast<unsigned>(std::max(ticks, 0));
         if (trace_clock < trace_next)
@@ -942,6 +993,8 @@ struct Inspector {
         frame_ticks = ticks;
         if (match && trace_ai())
             trace_wizards(*match, ticks);
+        if (match && ticks > 0 && trace_animation_enabled())
+            trace_animation(*match, ticks);
         service_script_presentation();
         service_history_audio();
         if (match) {
