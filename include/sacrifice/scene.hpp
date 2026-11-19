@@ -136,6 +136,7 @@ struct SceneModel {
     std::vector<float> reveal; // Per-placement MRMINSTANCE +208 construction reveal; empty means 1.
     // FLAG::ScreenOriented: drawn in the camera's rotation (local X right, Y up), ignoring yaw.
     bool screen_oriented{};
+    std::uint8_t look_mode{}; // 0 = always, 1 = classic look only, 2 = remastered look only.
     // WIDGET::Draw: a widget field carries each widget's anchor (renderer space) in the vertex normal, is
     // drawn to `widget_range` horizontally with its model material, and from 0.8 x range on fades out with
     // `widget_fade_flags`. Zero range marks an ordinary model.

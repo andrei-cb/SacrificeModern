@@ -1,9 +1,11 @@
 #include "sacrifice/scene.hpp"
+#include "sacrifice/mesh_import.hpp"
 #include "sacrifice/widgets.hpp"
 #include "sacrifice/creature.hpp"
 #include "sacrifice/saxs.hpp"
 #include "sacrifice/spell_registry.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <climits>
 #include <cstring>
@@ -329,6 +331,30 @@ MapScene MapScene::compose(const ResourceCatalog& catalog, const Archive& map, c
         return scene;
     std::map<std::uint32_t, std::size_t> models; // Model ID -> scene.models index, or SIZE_MAX if missing.
     std::vector<std::shared_ptr<WidgetField>> fields; // Given the clearings once every building is known.
+#if 0
+    // Just for testing: replace Trial map trees with random pine .obj models from obj/ when Remastered Look is active.
+    std::vector<SceneModel> remastered_trees;
+    {
+        std::string label(map.label());
+        for (char& ch : label)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if (label.find("trial") != std::string::npos) {
+            const auto& pines = load_obj_folder("obj", 1.0f);
+            remastered_trees.reserve(pines.size());
+            for (std::size_t pi = 0; pi < pines.size(); ++pi) {
+                SceneModel m{FourCC::from_text("pine")};
+                m.asset = pines[pi];
+                m.look_mode = 2; // Remastered Look only.
+                remastered_trees.push_back(std::move(m));
+            }
+        }
+    }
+    const auto is_trial_tree = [](FourCC id) {
+        const auto name = id.text();
+        return name == "pct1" || name == "pct2" || name == "pct4" || name == "pct5" || name == "pct7" ||
+               name == "ptre";
+    };
+#endif
     std::set<std::string> unresolved;
     const auto missing = [&](std::string text) {
         if (unresolved.insert(text).second)
@@ -597,6 +623,32 @@ MapScene MapScene::compose(const ResourceCatalog& catalog, const Archive& map, c
                 spawn.placement_index = spawn.state_placements[initial_state];
                 ++scene.parts;
             }
+#if 0
+            // Just for testing: swap Trial trees to random obj/ pines in Remastered Look.
+            if (!remastered_trees.empty() && is_trial_tree(entity.id)) {
+                float orig_height = 0.0f;
+                for (std::size_t si = scene.building_groups[group].first_spawn; si < scene.spawns.size(); ++si) {
+                    for (std::size_t mi : scene.spawns[si].state_models) {
+                        if (mi < scene.models.size()) {
+                            scene.models[mi].look_mode = 1; // Classic Look only.
+                            const auto& b = scene.models[mi].asset.geometry.bounds;
+                            orig_height = std::max(orig_height, b.maximum.z - b.minimum.z);
+                        }
+                    }
+                }
+                // Deterministic per-tree hash (never touches the match random stream).
+                std::uint32_t h = static_cast<std::uint32_t>(std::lround(entity.position.x * 13.0f)) * 374761393u ^
+                                  static_cast<std::uint32_t>(std::lround(entity.position.y * 17.0f)) * 668265263u;
+                h = (h ^ (h >> 13)) * 1274126177u;
+                h ^= h >> 16;
+                const std::size_t pick = h % remastered_trees.size();
+                const float h_jitter = 0.90f + 0.25f * (static_cast<float>((h >> 8) & 0xffu) / 255.0f);
+                const float yaw = 6.2831853f * (static_cast<float>((h >> 16) & 0xffu) / 255.0f);
+                const float scale = (orig_height > 2.0f ? orig_height : 22.0f) * h_jitter;
+                const float y_ground = terrain_height(terrain, entity.position.x, entity.position.y);
+                remastered_trees[pick].placements.push_back({{entity.position.x, y_ground, entity.position.y}, yaw, scale});
+            }
+#endif
         } else if (entity.type == static_cast<std::uint32_t>(EntityKind::Creature) ||
                    entity.type == static_cast<std::uint32_t>(EntityKind::Wizard)) {
             const bool wizard = entity.type == static_cast<std::uint32_t>(EntityKind::Wizard);
@@ -629,6 +681,12 @@ MapScene MapScene::compose(const ResourceCatalog& catalog, const Archive& map, c
             }
         }
     }
+#if 0
+    // Just for testing: append Remastered Look test pine trees.
+    for (auto& tree : remastered_trees)
+        if (!tree.placements.empty())
+            scene.models.push_back(std::move(tree));
+#endif
     for (const auto& field : fields)
         field->set_clearings(scene.clearings);
     return scene;

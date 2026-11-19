@@ -533,6 +533,7 @@ struct Renderer::Impl : renderer_shared::TerrainView {
         float reveal_min{}, reveal_max{};
         bool screen_oriented{}; // Rotation replaced by the camera's at draw time.
         bool soul{};            // Drawn after the other scene models (see the scene loop).
+        std::uint8_t look_mode{}; // 0 = always, 1 = classic look only, 2 = remastered look only.
         std::size_t vertex_count{};
         std::size_t index_capacity{};
         std::vector<std::uint32_t> dynamic_indices;
@@ -1261,6 +1262,7 @@ void Renderer::append_scene(const MapScene& scene) {
             batch.dynamic_indices = grouped.indices;
         batch.screen_oriented = model.screen_oriented;
         batch.soul = static_cast<bool>(model.soul);
+        batch.look_mode = model.look_mode;
         batch.widget_range = model.widget_range;
         batch.widget_fade_flags = model.widget_fade_flags;
         batch.widget_field = model.widget_field;
@@ -2114,6 +2116,8 @@ void Renderer::draw(const Camera& camera, bool wireframe, bool model_materials, 
         if (souls && !grass_drawn)
             draw_grass();
         if (batch.soul != souls)
+            continue;
+        if ((batch.look_mode == 1 && p.remastered) || (batch.look_mode == 2 && !p.remastered))
             continue;
         auto* vb = batch.vertices.Get();
         p.context->IASetVertexBuffers(0, 1, &vb, &stride, &offset);

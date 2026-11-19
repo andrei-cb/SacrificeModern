@@ -50,3 +50,6 @@ __pycache__/
 
 # Tests (kept local; fixtures are generated from the original game data)
 /tests/
+
+# Local test meshes
+/obj/
