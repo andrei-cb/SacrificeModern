@@ -351,6 +351,26 @@ float smooth(float low, float high, float v) {
     const float t = std::clamp((v - low) / (high - low), 0.0f, 1.0f);
     return t * t * (3 - 2 * t);
 }
+float hash2d(int x, int y) {
+    auto h = static_cast<std::uint32_t>(x) * 374761393u ^ static_cast<std::uint32_t>(y) * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return ((h ^ (h >> 16)) & 0xffffu) / 65535.0f;
+}
+float value_noise(float x, float y) {
+    const int x0 = static_cast<int>(std::floor(x)), y0 = static_cast<int>(std::floor(y));
+    float fx = x - x0, fy = y - y0;
+    fx = fx * fx * (3 - 2 * fx);
+    fy = fy * fy * (3 - 2 * fy);
+    const float a = hash2d(x0, y0), b = hash2d(x0 + 1, y0), c = hash2d(x0, y0 + 1), d = hash2d(x0 + 1, y0 + 1);
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+}
+std::uint32_t mix_rgb(std::uint32_t a, std::uint32_t b, float t) {
+    const auto ch = [&](int s) {
+        const float va = static_cast<float>(a >> s & 255), vb = static_cast<float>(b >> s & 255);
+        return static_cast<std::uint32_t>(std::clamp(va + (vb - va) * t, 0.0f, 255.0f) + .5f) << s;
+    };
+    return 0xff000000u | ch(0) | ch(8) | ch(16);
+}
 } // namespace
 float TerrainView::clearing(float x, float y) const {
     float open = 1;
@@ -414,24 +434,27 @@ const std::vector<TerrainView::Blade>& TerrainView::grass_cell(const Terrain& te
         if (ground == 0 && terrain_height(terrain, x, y, true) != 0)
             continue; // A hole.
         const auto light = light_at(x, y);
-        const float shade = .85f + .3f * next();
+        const float patch = value_noise(x * .035f, y * .035f);
+        const float warmth = value_noise(x * .085f + 13.7f, y * .085f - 7.3f) - .5f;
+        const float shade = .86f + .28f * next();
         // The tile's average is greyer than its texels, so the blade takes back saturation to match the
-        // ground around it; tips are lighter and a little yellower.
+        // ground around it; subtle world-space patches vary height and warmth, and tips are sun-kissed.
         const float k = tuning::ground_brightness * shade;
         Vec3 lit{colour.x * light.x * k, colour.y * light.y * k, colour.z * light.z * k};
         const float luma = lit.x * .299f + lit.y * .587f + lit.z * .114f;
-        const float boost = colour.y > colour.x ? 1.7f : 1.15f; // Less for dry (olive, straw) grass.
+        const float boost = colour.y > colour.x ? 1.65f : 1.15f; // Less for dry (olive, straw) grass.
         lit = {luma + (lit.x - luma) * boost, luma + (lit.y - luma) * boost, luma + (lit.z - luma) * boost};
-        const Vec3 root{lit.x * .75f, lit.y * .75f, lit.z * .75f};
-        const Vec3 tip{lit.x * 1.25f + .04f, lit.y * 1.3f + .04f, lit.z * 1.05f};
+        lit = {lit.x * (1 + .14f * warmth), lit.y * (1 + .05f * warmth), lit.z * (1 - .14f * warmth)};
+        const Vec3 root{lit.x * .66f, lit.y * .68f, lit.z * .66f};
+        const Vec3 tip{lit.x * 1.28f + .045f, lit.y * 1.32f + .045f, lit.z * 1.04f};
         Blade blade{};
         blade.x = x;
         blade.y = ground;
         blade.z = y;
-        blade.height = tuning::grass_height * (.55f + .9f * next()) * (.55f + .45f * density);
-        blade.width = tuning::grass_width * (.7f + .6f * next());
+        blade.height = tuning::grass_height * (.52f + .86f * next()) * (.55f + .45f * density) * (.76f + .52f * patch);
+        blade.width = tuning::grass_width * (.75f + .55f * next());
         blade.angle = next() * 3.1415927f;
-        const float lean = next() * 6.2831853f, amount = blade.height * .3f * next();
+        const float lean = next() * 6.2831853f, amount = blade.height * (.22f + .38f * next());
         blade.lean_x = std::cos(lean) * amount;
         blade.lean_z = std::sin(lean) * amount;
         blade.root = pack_rgb(root);
@@ -460,11 +483,12 @@ const std::vector<TerrainView::Blade>& TerrainView::grass_cell(const Terrain& te
         const float lush = tile_grass_[tile];
         const auto c = tile_colour_[tile];
         const float high = std::max({c.x, c.y, c.z}), low = std::min({c.x, c.y, c.z});
-        // Snow (bright and grey) or ice (bright and blue).
-        const bool snow = (high > .55f && high - low < .15f * high) || (high > .45f && c.z > c.x + .08f && c.z >= c.y);
+        // Snow (bright/pale grey-white), blue ice, or cyan/turquoise snow.
+        const bool snow = (high > .36f && high - low < .22f * high && c.z >= c.x - .02f) ||
+                          (high > .35f && c.z > c.x + .06f && (c.z >= c.y - .08f || c.y > c.x + .06f));
         const float pick = next();
         unsigned model;
-        if (lush > .4f)
+        if (lush > .5f)
             model = pick < .62f ? clutter::flowers + static_cast<unsigned>(next() * clutter::flower_count) % clutter::flower_count
                   : pick < .74f ? clutter::mushrooms + static_cast<unsigned>(next() * clutter::mushroom_count) % clutter::mushroom_count
                   : pick < .9f  ? clutter::pebbles + static_cast<unsigned>(next() * clutter::pebble_count) % clutter::pebble_count
@@ -473,10 +497,10 @@ const std::vector<TerrainView::Blade>& TerrainView::grass_cell(const Terrain& te
             model = pick < .2f ? clutter::flowers + 2 + static_cast<unsigned>(next() * 2) % 2 // Yellow.
                   : pick < .6f ? clutter::pebbles + static_cast<unsigned>(next() * clutter::pebble_count) % clutter::pebble_count
                                : clutter::twigs + static_cast<unsigned>(next() * clutter::twig_count) % clutter::twig_count;
-        else if (snow ? pick > .1f : pick > .5f)
-            continue; // Bare ground stays mostly bare; snow and ice almost entirely.
+        else if (snow || pick > .5f)
+            continue; // Snow and ice stay clean (Stratos maps have their own ice shards/flowers); bare ground mostly bare.
         else
-            model = pick < (snow ? 1 : .35f)
+            model = pick < .35f
                         ? clutter::pebbles + static_cast<unsigned>(next() * clutter::pebble_count) % clutter::pebble_count
                         : clutter::twigs + static_cast<unsigned>(next() * clutter::twig_count) % clutter::twig_count;
         const float ground = terrain_height(terrain, x, y);
@@ -527,37 +551,55 @@ void TerrainView::emit_blade(const Blade& blade, float grow, bool encode, std::v
                              std::vector<std::uint32_t>& indices) {
     const auto layer = [&](float h) { return foliage_layer(h, blade.hash, true); };
     const Vec3 root = encode ? Vec3{blade.x, blade.y, blade.z} : Vec3{0, 1, 0};
-    const Vec2 rank{encode ? blade.rank / 255.0f : 0, 0};
+    const float rank_x = encode ? blade.rank / 255.0f : 0.0f;
     if (blade.clutter) {
         const auto& model = clutter::models()[blade.clutter - 1];
         const float scale = blade.height * grow, c = std::cos(blade.angle), s = std::sin(blade.angle);
         const auto base = static_cast<std::uint32_t>(vertices.size());
         for (const auto& point : model.points) {
-            const auto v = point.position;
+            const auto v = point.position, n = point.normal;
             const auto channel = [&](int shift) {
                 return std::min(255u, ((blade.root >> shift & 255) * (point.color >> shift & 255) + 127) / 255) << shift;
             };
+            const Vec3 vn = encode ? root : Vec3{n.x * c + n.y * s, n.z, n.y * c - n.x * s};
+            const float up = model.rigid ? 1.0f : std::clamp(v.z * 2.5f, 0.0f, 1.0f);
             vertices.push_back({{blade.x + (v.x * c + v.y * s) * scale, blade.y + v.z * scale,
                                  blade.z + (v.y * c - v.x * s) * scale},
-                                root, rank, 0xff000000u | channel(0) | channel(8) | channel(16),
+                                vn, {rank_x, up}, 0xff000000u | channel(0) | channel(8) | channel(16),
                                 layer(model.rigid ? 0 : v.z * scale)});
         }
         for (const auto& triangle : model.triangles)
             indices.insert(indices.end(), {base + triangle[0], base + triangle[1], base + triangle[2]});
         return;
     }
-    // A tuft of three blades fanning out from one root, the outer ones shorter and leaning away.
+    // A tuft of three curved two-segment blades fanning out from a small clump around the root.
+    const std::uint32_t mid_color = mix_rgb(blade.root, blade.tip, .48f);
+    static constexpr std::array<float, 3> height_scale{1.0f, .82f, .64f};
+    static constexpr std::array<float, 3> spread_scale{.04f, .11f, .13f};
     for (int k = 0; k < 3; ++k) {
-        const float angle = blade.angle + k * 2.0943951f, height = blade.height * grow * (k ? .7f : 1.0f);
-        const float c = std::cos(angle) * blade.width * .5f, s = std::sin(angle) * blade.width * .5f;
-        const float lean_x = k ? blade.lean_x * .5f + s * 2.5f * (k == 1 ? 1 : -1) : blade.lean_x,
-                    lean_z = k ? blade.lean_z * .5f - c * 2.5f * (k == 1 ? 1 : -1) : blade.lean_z;
+        const float angle = blade.angle + k * 2.0943951f;
+        const float height = blade.height * grow * height_scale[k];
+        const float ca = std::cos(angle), sa = std::sin(angle);
+        const float hw = blade.width * .5f, mhw = hw * .56f;
+        const float ox = ca * spread_scale[k], oz = sa * spread_scale[k];
+        const float out_lean = height * (k == 0 ? .2f : .42f);
+        const float lx = (blade.lean_x * .6f + ca * out_lean) * grow;
+        const float lz = (blade.lean_z * .6f + sa * out_lean) * grow;
+        const float bx = blade.x + ox, bz = blade.z + oz;
+        const float by = blade.y - .03f; // Slightly rooted so blades never float on slopes.
+        const float mx = bx + lx * .34f, my = by + height * .54f, mz = bz + lz * .34f;
+        const float tx = bx + lx, ty = by + height, tz = bz + lz;
+        // Side vector perpendicular to the blade's lean/facing.
+        const float sx = -sa * hw, sz = ca * hw;
+        const float msx = -sa * mhw, msz = ca * mhw;
+        const Vec3 bn = encode ? root : Vec3{ca * .35f, .94f, sa * .35f};
         const auto base = static_cast<std::uint32_t>(vertices.size());
-        vertices.push_back({{blade.x - c, blade.y, blade.z - s}, root, rank, blade.root, layer(0)});
-        vertices.push_back({{blade.x + c, blade.y, blade.z + s}, root, rank, blade.root, layer(0)});
-        vertices.push_back({{blade.x + lean_x * grow, blade.y + height, blade.z + lean_z * grow},
-                            root, rank, blade.tip, layer(height)});
-        indices.insert(indices.end(), {base, base + 1, base + 2});
+        vertices.push_back({{bx - sx, by, bz - sz}, bn, {rank_x, 0.0f}, blade.root, layer(0)});
+        vertices.push_back({{bx + sx, by, bz + sz}, bn, {rank_x, 0.0f}, blade.root, layer(0)});
+        vertices.push_back({{mx - msx, my, mz - msz}, bn, {rank_x, .54f}, mid_color, layer(height * .54f)});
+        vertices.push_back({{mx + msx, my, mz + msz}, bn, {rank_x, .54f}, mid_color, layer(height * .54f)});
+        vertices.push_back({{tx, ty, tz}, bn, {rank_x, 1.0f}, blade.tip, layer(height)});
+        indices.insert(indices.end(), {base, base + 1, base + 3, base, base + 3, base + 2, base + 2, base + 3, base + 4});
     }
 }
 void TerrainView::grass_chunk(const Terrain& terrain, int chunk_x, int chunk_y, std::vector<Vertex>& vertices,

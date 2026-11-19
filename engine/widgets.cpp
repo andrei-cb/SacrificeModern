@@ -98,7 +98,7 @@ FloraMesh WidgetField::flora_mesh() const {
         mesh.models.push_back({static_cast<unsigned>(mesh.indices.size()), static_cast<unsigned>(model.triangles.size() * 3),
                                static_cast<int>(mesh.vertices.size())});
         for (const auto& point : model.points) {
-            Vertex vertex{point.position, {0, 1, 0}, {}, point.color};
+            Vertex vertex{point.position, point.normal, {}, point.color};
             vertex.texture_layer = model.rigid ? 1 : 0;
             mesh.vertices.push_back(vertex);
         }
@@ -223,12 +223,13 @@ WidgetField::Frame WidgetField::draw(const Terrain& terrain, Vec3 eye, Vec3 forw
             }
             frame.triangles += model.triangles.size();
             for (const auto& point : model.points) {
-                const auto v = point.position;
+                const auto v = point.position, n = point.normal;
                 const auto channel = [&](int shift) {
                     return ((colour >> shift & 255) * (point.color >> shift & 255) + 127) / 255 << shift;
                 };
                 Vertex vertex{{(v.x * c + v.y * s) * size + p.x, v.z * size + p.z, p.y + (v.y * c - v.x * s) * size},
-                              {0, 1, 0}, {}, (colour & 0xff000000u) | channel(0) | channel(8) | channel(16)};
+                              {n.x * c + n.y * s, n.z, n.y * c - n.x * s}, {},
+                              (colour & 0xff000000u) | channel(0) | channel(8) | channel(16)};
                 vertex.texture_layer = model.rigid ? foliage_layer(0, hash, true) : foliage_layer(v.z * size, hash, false);
                 frame.vertices.push_back(vertex);
             }

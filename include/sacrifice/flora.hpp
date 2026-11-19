@@ -14,13 +14,14 @@ struct WidgetModel;
 struct FloraModel {
     struct Point {
         Vec3 position;
+        Vec3 normal{0, 0, 1};
         std::uint32_t color{};
     };
     std::vector<Point> points;
     std::vector<std::array<std::uint32_t, 3>> triangles;
     bool rigid{}; // Rocks: no wind or root shade.
 };
-enum class FloraKind : std::uint8_t { grass, flower, fern, bush, rock, twig, mushroom };
+enum class FloraKind : std::uint8_t { grass, flower, fern, bush, rock, crystal, twig, mushroom };
 struct FloraStyle {
     FloraKind kind{FloraKind::grass};
     Vec3 leaf{.3f, .45f, .2f};   // Main colour (leaves, stems, stone, wood).

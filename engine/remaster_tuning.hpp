@@ -133,6 +133,7 @@ inline constexpr float wind_storm = .65f;       // [0, 2]     Wind added under h
 inline constexpr float wind_bend = .14f;        // [0, .5]    Sway at full wind, per unit of plant height (tapered).
 inline constexpr float foliage_sun = .25f;      // [0, 1]     Extra sunlight on sunlit plants (shadowed ones miss it).
 inline constexpr float foliage_backlight = .35f; // [0, 1.5]  Glow of leaves and grass looking towards the sun.
+inline constexpr float foliage_sheen = .18f;    // [0, 1]     Sunlit specular sheen on curved blades and leaves.
 inline constexpr float foliage_tint = .12f;     // [0, .4]    Per-plant colour variation (hue and brightness).
 inline constexpr float foliage_root = .55f;     // [0, 1]     Brightness at a plant's root (darker in its own shade).
 inline constexpr float foliage_root_height = 1.5f; // [.1, 10] Height over which that root shade lifts.
@@ -146,11 +147,11 @@ inline constexpr float grass_density = 1.5f;    // [0, 4]     Grass tufts (three
                                                 //            lushest ground.
 inline constexpr float grass_range = 150.0f;    // [20, 200]  Distance the grass layer reaches (thinned like the plants,
                                                 //            by flora_thin_start and flora_far_keep).
-inline constexpr float grass_height = .8f;      // [.2, 2]    Average blade height.
+inline constexpr float grass_height = .85f;     // [.2, 2]    Average blade height.
 inline constexpr float clutter_density = .06f;  // [0, .5]    Ground clutter (flowers, mushrooms, pebbles, twigs)
                                                 //            per square unit, within the grass range.
 inline constexpr float clutter_size = 1.8f;     // [.3, 3]    Clutter scale (about one unit across).
-inline constexpr float grass_width = .16f;      // [.02, .4]  Average blade width at the root.
+inline constexpr float grass_width = .18f;      // [.02, .4]  Average blade width at the root.
 // Distance detail for the new plants (fractions of their draw range), as open-world games thin foliage:
 inline constexpr float flora_thin_start = .4f;  // [0, 1]     Plants start thinning out (shrinking away) here.
 inline constexpr float flora_far_keep = .4f;    // [0, 1]     Share of plants still drawn at the range's edge.
@@ -163,7 +164,7 @@ inline constexpr float foliage_fill = .5f;      // [0, 1]     Thinned plants and
 
 // The shader-side values, as constants named in upper case in both shading languages.
 inline std::string shader_constants(bool wgsl) {
-    static constexpr std::array<std::pair<const char*, float>, 54> values{{
+    static constexpr std::array<std::pair<const char*, float>, 55> values{{
         {"FOLIAGE_FILL", foliage_fill},
         {"FLORA_THIN_START", flora_thin_start},
         {"FLORA_FAR_KEEP", flora_far_keep},
@@ -215,6 +216,7 @@ inline std::string shader_constants(bool wgsl) {
         {"WIND_BEND", wind_bend},
         {"FOLIAGE_SUN", foliage_sun},
         {"FOLIAGE_BACKLIGHT", foliage_backlight},
+        {"FOLIAGE_SHEEN", foliage_sheen},
         {"FOLIAGE_TINT", foliage_tint},
         {"FOLIAGE_ROOT", foliage_root},
         {"FOLIAGE_ROOT_HEIGHT", foliage_root_height},

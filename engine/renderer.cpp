@@ -63,19 +63,22 @@ float3 foliage_wind(float3 w,uint tile){
  float t=wind.x;float phase=dot(w.xz,float2(0.13,0.09))+(tile&0xff)*0.0246;
  float gust=0.55+0.45*sin(t*0.6-dot(w.xz,wind.zw)*0.035);
  float sway=sin(t*1.9+phase)*0.35+sin(t*3.3+phase*1.7)*0.15;
- float bend=WIND_BEND*pow(foliage_height(tile),0.6)*wind.y;
- return float3(wind.z,0,wind.w)*bend*(gust+sway)+float3(-wind.w,0,wind.z)*bend*0.3*sin(t*2.7+phase*1.3);
+ float h=foliage_height(tile);
+ float bend=WIND_BEND*pow(h,0.6)*wind.y;
+ float3 disp=float3(wind.z,0,wind.w)*bend*(gust+sway)+float3(-wind.w,0,wind.z)*bend*0.3*sin(t*2.7+phase*1.3);
+ disp.y=-0.18*dot(disp.xz,disp.xz)/max(h,0.25);
+ return disp;
 }
 struct In {float3 p:POSITION;float3 n:NORMAL;float2 uv:TEXCOORD;float4 c:COLOR;uint tile:LAYER;};
-// Remastered static grass (grass = camera X/Z, reach, enabled): the vertex's tuft root is in n and its rank in
-// uv.x. As TerrainView::grass does on the CPU, tufts thin out past FLORA_THIN_START and shrink to their roots
-// as their rank passes the thinning line and at the edge; a shrunk tuft is degenerate and draws nothing.
-// Thinned tufts widen by up to FOLIAGE_FILL, so the ground stays covered as they thin.
-In grass_vertex(In v){float3 root=v.n;float t=length(root.xz-grass.xy)/grass.z;
+// Remastered static grass (grass = camera X/Z, reach, enabled): the vertex's tuft root is in n, its rank in
+// uv.x, and its root-to-tip fraction in uv.y. As TerrainView::grass does on the CPU, tufts thin out past
+// FLORA_THIN_START and shrink to their roots as their rank passes the thinning line and at the edge; a shrunk
+// tuft is degenerate and draws nothing. Thinned tufts widen by up to FOLIAGE_FILL, so the ground stays covered.
+In grass_vertex(In v){float3 root=v.n;float3 rel=v.p-root;float t=length(root.xz-grass.xy)/grass.z;
  float keep=t<FLORA_THIN_START?1.1:1.1-(t-FLORA_THIN_START)/(1-FLORA_THIN_START)*(1.1-FLORA_FAR_KEEP);float g=t>=1?0:min(1,(1-t)*5)*saturate((keep-v.uv.x)*8);
  float fill=1+FOLIAGE_FILL*(1-min(keep,1));
- v.p=root+(v.p-root)*g*float3(fill,1,fill);uint h=(uint)(((v.tile>>8)&0xfff)*g);v.tile=(v.tile&~0xfff00u)|(h<<8);
- v.n=float3(0,1,0);v.uv=0;return v;}
+ v.p=root+rel*g*float3(fill,1,fill);uint h=(uint)(((v.tile>>8)&0xfff)*g);v.tile=(v.tile&~0xfff00u)|(h<<8);
+ v.n=normalize(float3(rel.x*1.4,max(rel.y,0.25)+0.45,rel.z*1.4));v.uv=float2(0,v.uv.y);return v;}
 struct Out {float4 p:SV_POSITION;float3 n:NORMAL;float2 uv:TEXCOORD;float4 c:COLOR;nointerpolation uint tile:LAYER;float3 w:TEXCOORD1;nointerpolation float3 anchor:TEXCOORD2;float detail:TEXCOORD3;float3 points:TEXCOORD4;float3 point_only:TEXCOORD5;};
 Out vs_main(In v) {Out o;if(grass.w>0 && is_foliage(v.tile))v=grass_vertex(v);float4 w=mul(float4(v.p,1),world);if(is_foliage(v.tile))w.xyz+=foliage_wind(w.xyz,v.tile);
  o.p=mul(w,view_projection);o.w=w.xyz;o.anchor=v.n;o.n=normalize(mul(v.n,(float3x3)world));o.uv=v.uv;o.c=v.c;o.tile=v.tile;
@@ -186,19 +189,34 @@ float3 remastered_ground(float3 albedo,float3 light,float3 w) {
  // Snow takes the light's brightness, not the baked lightmap's tint.
  return lerp(ground,float3(0.9,0.92,0.96)*max(dot(light,luma)*1.4,0.3),snow);
 }
-// Remastered foliage shading: sun shadows and the lightning flash on the (CPU-lit) plants, extra sun on lit
-// ones, leaves glowing against the sun, a colour shift per plant and shade at the root.
-float3 foliage(float3 rgb,float3 w,uint tile,float h) {
+// Remastered foliage shading: wrapped directional sunlight from the plant's normal, sky/ground hemisphere
+// softness, sun shadows and lightning flash, subsurface backlight, sunlit sheen, per-plant tint, and root AO.
+float3 foliage(float3 rgb,float3 w,float3 n,uint tile,float h,float uv_y) {
+ n=normalize(n);
  float vis=sun_visibility(w);float sun=sun_color.w>0?1:0;
  bool baked=(tile&0x20000000)!=0;
- rgb*=lerp(1-SHADOW_GROUND*shadow_amount()*(baked?1:0.6),1,vis)*(1+LIGHTNING_LIGHT*weather.w*vis);
- if(!baked)rgb*=1+FOLIAGE_SUN*vis*sun*dot(sun_light(),float3(0.299,0.587,0.114));
- float up=baked?1:saturate(h/FOLIAGE_ROOT_HEIGHT);
- float back=pow(saturate(dot(normalize(w-eye.xyz),sun_direction.xyz)),4)*FOLIAGE_BACKLIGHT*vis*sun*up;
- rgb+=rgb*sun_light()*back*float3(1,1.1,0.7);
+ bool rigid=baked && h==0;
+ float ndl=dot(n,sun_direction.xyz);
+ float wrap=saturate((ndl+0.65)/1.65);
+ float3 sl=sun_light();
+ float sun_luma=dot(sl,float3(0.299,0.587,0.114));
+ float hemi=0.92+0.14*(n.y*0.5+0.5);
+ rgb*=lerp(1-SHADOW_GROUND*shadow_amount()*(baked?1:0.65),1,vis)*(1+LIGHTNING_LIGHT*weather.w*vis);
+ if(!baked)
+  rgb*=hemi*(0.78+0.28*wrap+FOLIAGE_SUN*vis*sun*sun_luma*(0.35+0.95*wrap));
+ else
+  rgb*=lerp(1.0,lerp(0.84,1.18,wrap),vis*sun)*(0.94+0.1*(n.y*0.5+0.5));
+ float leaf_up=rigid?0:(baked?saturate(uv_y):saturate(h/FOLIAGE_ROOT_HEIGHT));
+ float3 vdir=normalize(w-eye.xyz);
+ float back=pow(saturate(dot(vdir,sun_direction.xyz)),4)*FOLIAGE_BACKLIGHT*vis*sun*leaf_up;
+ rgb+=rgb*sl*back*float3(1,1.12,0.65);
+ float3 hv=normalize(sun_direction.xyz-vdir);
+ float sheen=pow(saturate(dot(n,hv)),18.0)*FOLIAGE_SHEEN*vis*sun*leaf_up;
+ rgb+=sl*sheen*lerp(rgb,float3(1,1,0.9),0.35);
  float k1=(tile&15)/15.0-0.5,k2=((tile>>4)&15)/15.0-0.5;
  rgb*=(1+FOLIAGE_TINT*2*k1)*(1+FOLIAGE_TINT*float3(k2,-0.4*k2,-k2));
- if(!baked)rgb*=lerp(FOLIAGE_ROOT,1,up);
+ if(!baked)rgb*=lerp(FOLIAGE_ROOT,1,leaf_up);
+ else if(!rigid)rgb*=lerp(0.76,1.0,saturate(uv_y*1.4));
  return rgb;
 }
 float3 fogged(float3 rgb,float3 w,bool additive) {
@@ -244,7 +262,7 @@ float4 ps_main(Out v):SV_TARGET {
    }
    if((flags&1)!=0 && material.z==0 && material.w==0)
      rgb*=remaster.x>0 && sun_color.w>0?remastered_light(v.n,v.point_only,v.w):v.points;
-   if(is_foliage(v.tile))rgb=foliage(rgb,v.w,v.tile,v.detail);
+   if(is_foliage(v.tile))rgb=foliage(rgb,v.w,v.n,v.tile,v.detail,v.uv.y);
    return float4(fogged(rgb,v.w,(flags&0x7f00)==0x2000),alpha);
  }
  bool tiled=options.y>0.5 && v.tile!=0xffffffff;
@@ -276,8 +294,9 @@ ShadowOut vs_shadow(In v) {ShadowOut o;o.p=mul(mul(float4(v.p,1),world),shadow_m
 // Remastered instanced flora (widgets.hpp FloraInstance): the model-space vertex placed, turned and sized
 // per plant, its albedo lit by the plant's anchor colour, and the foliage layer built as foliage_layer does.
 struct Inst {float4 place:PLACE;float2 turn:TURN;float4 c:TINT;uint hash:HASH;};
-In flora_vertex(In v,Inst i){In o=v;float3 m=v.p;float s=i.place.w;
+In flora_vertex(In v,Inst i){In o=v;float3 m=v.p;float3 n=v.n;float s=i.place.w;
  o.p=float3((m.x*i.turn.x+m.y*i.turn.y)*s+i.place.x,m.z*s+i.place.y,i.place.z+(m.y*i.turn.x-m.x*i.turn.y)*s);
+ o.n=float3(n.x*i.turn.x+n.y*i.turn.y,n.z,n.y*i.turn.x-n.x*i.turn.y);
  o.c=float4(v.c.rgb*i.c.rgb,i.c.a);
  uint h=v.tile!=0?0:(uint)clamp(m.z*s*16,0,4095);
  o.tile=0x40000000u|(v.tile!=0?0x20000000u:0u)|(h<<8)|(i.hash&0xff);return o;}
