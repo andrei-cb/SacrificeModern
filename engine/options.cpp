@@ -51,7 +51,7 @@ constexpr std::array<std::pair<FourCC, int>, 5> control_bits{
 
 // Integer entries of 0x4c8db8 that FORM:opts edits, in table order. ctrl has no range of its own; the
 // port bounds it to its five checkbox bits.
-const std::array<OptionSetting, 32> GameOptions::settings{{
+const std::array<OptionSetting, 33> GameOptions::settings{{
     {id("mspd"), 32, 16, 128}, {id("ctr!"), 7, 5, 9},     {id("texr"), 0, 0, 3},     {id("gdet"), 3, 0, 7},
     {id("mscr"), 256, 32, 256}, {id("rate"), 144, 30, 144}, {id("ffir"), 1, 0, 1},     {id("fdam"), 64, 0, 128},
     {id("tipo"), 1, 0, 1},     {id("rdem"), 1, 0, 1},     {id("swap"), 0, 0, 1},     {id("dblc"), 20, 10, 60},
@@ -63,7 +63,7 @@ const std::array<OptionSetting, 32> GameOptions::settings{{
     // bump maps; 0x40d380 keeps at most one on), the window mode, the framerate readout, drawing between
     // ticks, the view shake (0x47fbb0) and the remastered look (a modern addition; off is the original's).
     {id("dmap"), 0, 0, 1},     {id("bmap"), 1, 0, 1},     {id("wmod"), 0, 0, 1},     {id("sfps"), 0, 0, 1},
-    {id("smth"), 1, 0, 1},     {id("shak"), 1, 0, 1},     {id("rmst"), 1, 0, 1},
+    {id("smth"), 1, 0, 1},     {id("shak"), 1, 0, 1},     {id("rmst"), 1, 0, 1},     {id("stfe"), 0, 0, 1},
 }};
 
 void GameOptions::reset() {

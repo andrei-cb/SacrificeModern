@@ -1292,7 +1292,28 @@ struct Inspector {
                     object->prepare_model();
                     renderer.update_scene_texture(i, object->texture_override.value ?
                         particle_texture(renderer, object->texture_override).view.get() : nullptr, object->grayscale);
-                    renderer.update_scene_transform(i, shown(*object));
+                    auto transform = shown(*object);
+                    if (object->strafe_mode) {
+                        const float vx = object->motion.local_velocity.x, vy = object->motion.local_velocity.y;
+                        float target_offset = 0.0f;
+                        if (std::abs(vx) > 1e-4f) {
+                            target_offset = vy >= 0 ? -std::atan2(vx, std::max(vy, std::abs(vx) * 0.36f))
+                                                    : std::atan2(vx, std::max(-vy, std::abs(vx) * 1.4f));
+                        }
+                        object->strafe_visual_yaw += (target_offset - object->strafe_visual_yaw) * 0.2f;
+                        if (std::abs(object->strafe_visual_yaw) > 1e-4f) {
+                            const float cs = std::cos(object->strafe_visual_yaw),
+                                        sn = std::sin(object->strafe_visual_yaw);
+                            const auto o = transform.orientation;
+                            for (int k = 0; k < 3; ++k) {
+                                transform.orientation[k] = cs * o[k] + sn * o[3 + k];
+                                transform.orientation[3 + k] = -sn * o[k] + cs * o[3 + k];
+                            }
+                        }
+                    } else {
+                        object->strafe_visual_yaw = 0.0f;
+                    }
+                    renderer.update_scene_transform(i, transform);
                     renderer.update_scene_visibility(
                         i, 0, !(object->state_flags & MatchObject::removed_flag), 1,
                         static_cast<unsigned>((1.0 - static_cast<double>(object->fade) * object->fade) *
@@ -1575,6 +1596,14 @@ struct Inspector {
         }
         if (!wizard)
             return;
+        wizard->strafe_mode = options.value(FourCC::from_text("stfe")) != 0;
+        if (wizard->strafe_mode && !ImGui::GetIO().WantCaptureKeyboard) {
+            const bool q = input.scancodes[16], e = input.scancodes[18];
+            wizard->strafe_turn = (e ? 127 : 0) - (q ? 127 : 0);
+            keyboard_engaged |= q || e;
+        } else {
+            wizard->strafe_turn = 0;
+        }
         keyboard_engaged |= keyboard.engaged();
         if (keyboard_engaged)
             wizard->input_provider = [axes = keyboard.axes()] { return axes; };

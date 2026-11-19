@@ -304,7 +304,11 @@ void CreatureActor::bind_body(std::shared_ptr<const SaxsAsset> body) {
 void CreatureActor::update_pose() {
     if (!body_ || !clip_)
         throw Error("Creature model requires a body and animation");
-    const auto frame = static_cast<unsigned>(frame_);
+    unsigned frame = static_cast<unsigned>(frame_);
+    const unsigned count = static_cast<unsigned>(clip_->animation.frames.size());
+    if (strafe_mode && motion.local_velocity.y < -1e-4f && count > 1 &&
+        fsm_->state() && (fsm_->state()->flags & 1))
+        frame = (count - 1) - std::min(frame, count - 1);
     if (pose_ && ((model_flags & 4) || (posed_clip_ == clip_ && posed_frame_ == frame)))
         return;
     pose_ = saxs_pose(body_->model, clip_->animation, static_cast<float>(frame));
@@ -755,7 +759,7 @@ void CreatureActor::update(Match& match, int ticks) {
     const auto flags = fsm_->state() ? fsm_->state()->flags : 0;
     const auto properties = resources_->definition.flags;
     const bool controlled = (flags & 1) && !(state_flags & 0x80000);
-    float yaw_target = 0, pitch_target = 0, forward = 0, vertical = 0, world_vertical = 0;
+    float yaw_target = 0, pitch_target = 0, forward = 0, strafe = 0, vertical = 0, world_vertical = 0;
     const auto approach = [](float& value, float target, float accel, float brake) {
         motion_approach(value, target, target >= 0 ? accel : brake, target >= 0 ? brake : accel);
     };
@@ -807,21 +811,45 @@ void CreatureActor::update(Match& match, int ticks) {
             static_cast<float>(ticks * static_cast<double>(stats.current[3]) * 0.00001681802892700975);
         if (old_state & 2) {
             if (controlled) {
-                yaw_target = static_cast<float>(-static_cast<double>(controls[0]) * 0.0004122821522309711);
-                forward = static_cast<float>(-static_cast<double>(controls[1]) * stats.current[3] *
-                                             0.000001324254246221241);
-                double slope = static_cast<double>(m.orientation[5]) * m.plane.normal.z +
-                               static_cast<double>(m.orientation[4]) * m.plane.normal.y +
-                               static_cast<double>(m.orientation[3]) * m.plane.normal.x;
-                if (forward < 0)
-                    slope = -slope;
-                forward = static_cast<float>((slope * 0.5 + 1) * forward);
-                if (!(properties & 0x400)) {
-                    vertical = static_cast<float>(-slope * forward);
-                    forward = static_cast<float>(std::sqrt(1 - slope * slope) * forward);
+                const double speed_scale = static_cast<double>(stats.current[3]) * 0.000001324254246221241;
+                if (strafe_mode) {
+                    yaw_target = static_cast<float>(-static_cast<double>(strafe_turn) * 0.0004122821522309711);
+                    strafe = static_cast<float>(static_cast<double>(controls[0]) * speed_scale);
+                    forward = static_cast<float>(-static_cast<double>(controls[1]) * speed_scale);
+                    // Normalize diagonal speed so W+A/W+D matches running straight.
+                    if (strafe != 0 && forward != 0) {
+                        const float mag = std::hypot(strafe, forward);
+                        const float limit = std::max(std::abs(strafe), std::abs(forward));
+                        if (mag > limit) {
+                            const float k = limit / mag;
+                            strafe *= k;
+                            forward *= k;
+                        }
+                    }
+                    // Align wizard facing to the camera direction while moving (unless Q/E is turning).
+                    if (strafe_turn == 0 && (controls[0] != 0 || controls[1] != 0)) {
+                        motion_approach_angle(m.yaw, view_yaw, static_cast<float>(ticks * 0.18));
+                    }
+                    if (common_status & 0x20) {
+                        forward *= 0.25f;
+                        strafe *= 0.25f;
+                    }
+                } else {
+                    yaw_target = static_cast<float>(-static_cast<double>(controls[0]) * 0.0004122821522309711);
+                    forward = static_cast<float>(-static_cast<double>(controls[1]) * speed_scale);
+                    double slope = static_cast<double>(m.orientation[5]) * m.plane.normal.z +
+                                   static_cast<double>(m.orientation[4]) * m.plane.normal.y +
+                                   static_cast<double>(m.orientation[3]) * m.plane.normal.x;
+                    if (forward < 0)
+                        slope = -slope;
+                    forward = static_cast<float>((slope * 0.5 + 1) * forward);
+                    if (!(properties & 0x400)) {
+                        vertical = static_cast<float>(-slope * forward);
+                        forward = static_cast<float>(std::sqrt(1 - slope * slope) * forward);
+                    }
+                    if (common_status & 0x20)
+                        forward *= 0.25f;
                 }
-                if (common_status & 0x20)
-                    forward *= 0.25f;
             }
             if (flags & 4) {
                 fsm_->event(9);
@@ -839,7 +867,7 @@ void CreatureActor::update(Match& match, int ticks) {
             } else if (m.airborne_ticks > 15)
                 fsm_->event(8);
         }
-        motion_approach(m.local_velocity.x, 0, acceleration, braking);
+        motion_approach(m.local_velocity.x, strafe, acceleration, braking);
         approach(m.local_velocity.y, forward, acceleration, braking);
         approach(m.local_velocity.z, vertical, acceleration, braking);
         const float turn = static_cast<float>(ticks * 1.570795);

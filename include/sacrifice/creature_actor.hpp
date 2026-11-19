@@ -203,6 +203,11 @@ class CreatureActor : public MatchObject {
     bool flee_point(const Match& match, Vec3& point) const; // 0x4951b0.
     // +744 / +748: the view yaw and pitch the follow camera orbits with (0x47fca0); spawn sets the yaw.
     float view_yaw{}, view_pitch{};
+    // Modern addition (disabled by default, 'stfe'): A/D strafes laterally instead of turning,
+    // while Q/E apply the classic turn axis (-127..127).
+    bool strafe_mode{};
+    int strafe_turn{};
+    float strafe_visual_yaw{}; // Drawing-only body turn toward the strafe direction.
     float danger{};        // +1468: 0x48f080 known enemy strength against own fighters near the creature.
     float courage{1.2f};   // +1472: danger above this makes a capability-1 creature flee.
     int ground_cost{};     // +1476: path cost at its cell.

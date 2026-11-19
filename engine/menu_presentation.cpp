@@ -170,6 +170,25 @@ bool option_menu_command(GameOptions& options, FourCC& page, FourCC command) {
     return true;
 }
 void adapt_graphics_page(MenuForm& form) {
+    if (form.id == id("copt")) {
+        // Modern addition (disabled by default): WoW-style A/D strafing on the Controls page.
+        std::optional<MenuForm::Widget> checkbox;
+        float y = 0;
+        for (const auto& widget : form.widgets) {
+            if (widget.kind == 7 && widget.rectangle.origin.y >= y) {
+                y = widget.rectangle.origin.y;
+                checkbox = widget;
+            }
+        }
+        if (checkbox) {
+            auto widget = *checkbox;
+            widget.id = widget.text = id("stfe");
+            widget.help = {};
+            widget.rectangle.origin.y = y + 20;
+            form.widgets.push_back(widget);
+        }
+        return;
+    }
     if (form.id != id("gopt"))
         return;
     // Dropped: the resolution list (the window sets the size), and the settings the port does not vary.
@@ -224,11 +243,12 @@ void adapt_graphics_page(MenuForm& form) {
     }
 }
 std::optional<std::string_view> port_menu_text(FourCC record) {
-    static constexpr std::array<std::pair<const char*, std::string_view>, 10> texts{{
+    static constexpr std::array<std::pair<const char*, std::string_view>, 11> texts{{
         {"sfps", "Show Framerate"},
         {"shak", "Camera Shake"},
         {"smth", "Smooth Motion"},
         {"rmst", "Remastered Look"},
+        {"stfe", "Strafe Movement"},
         {"widj", "Vegetation"},
         {"rate", "Max Framerate"},
         {"tbuf", "VSync"},

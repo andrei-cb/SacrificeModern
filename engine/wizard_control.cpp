@@ -214,7 +214,12 @@ void FollowCamera::update(CreatureActor& target, const Terrain& terrain, int tic
             flags |= 0x100;
     }
     const unsigned now = flags & 0x180;
-    if (flags & 0x14)
+    if (target.strafe_mode) {
+        // In WoW-style strafe mode, camera yaw steers directly; Q/E turning rotates the view with the body.
+        if (target.strafe_turn != 0 && !(flags & 4))
+            approach(target.view_yaw, target.motion.yaw, static_cast<float>(ticks) * .08f);
+        flags &= ~1u;
+    } else if (flags & 0x14)
         flags &= ~1u;
     else if (flags & 0xa) {
         if (!local || ((before ^ now) & now))

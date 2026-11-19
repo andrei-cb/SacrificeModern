@@ -31,7 +31,7 @@ struct OptionSetting {
 // The values behind FORM:opts and its pages (handlers 0x40d080 opts, 0x40e820 sopt, 0x40eb10 copt).
 class GameOptions {
   public:
-    static const std::array<OptionSetting, 32> settings;
+    static const std::array<OptionSetting, 33> settings;
     GameOptions() { reset(); }
     void reset(); // 0x40c960(0): every entry back to its default ('dflt').
     [[nodiscard]] static const OptionSetting* find(FourCC id);
