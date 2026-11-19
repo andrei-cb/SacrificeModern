@@ -610,8 +610,8 @@ FloraStyle widget_style(const std::string& id, const WidgetModel& widget, const 
         style.height = std::clamp(style.height, .3f, std::max(.6f, style.width * .9f));
     else if (style.kind == FloraKind::fern)
         style.height = std::max(style.height, style.width * .35f);
-    else if (style.kind == FloraKind::grass && style.height > 1.2f * style.width)
-        style.height *= .68f;
+    else if (style.kind == FloraKind::grass && style.height > 1.1f)
+        style.height = 1.1f + (style.height - 1.1f) * .45f;
     return style;
 }
 std::vector<FloraModel> make_flora(const FloraStyle& style, std::uint32_t seed, unsigned variants, bool far) {
