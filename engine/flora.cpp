@@ -256,30 +256,32 @@ void make_fern(Builder& b, const FloraStyle& s, Random& r) {
 }
 void make_bush(Builder& b, const FloraStyle& s, Random& r) {
     // Organic lobed bush: 5 overlapping sub-lobes of multi-leaf sprays with spherical canopy normals so
-    // directional sunlight and ambient occlusion give the shrub genuine 3D volume.
-    const Vec3 centre{0, 0, s.height * .46f};
+    // directional sunlight and ambient occlusion give the shrub genuine 3D volume, sized to stay within
+    // the original widget's footprint.
+    const Vec3 centre{0, 0, s.height * .30f};
     std::array<Vec3, 5> lobes{centre};
     for (int l = 1; l < 5; ++l) {
         const float a = (l - 1) * pi * .5f + r.range(-.35f, .35f);
-        lobes[l] = add(centre, Vec3{std::cos(a) * s.width * .24f, std::sin(a) * s.width * .24f,
-                                    s.height * r.range(-.12f, .14f)});
+        lobes[l] = add(centre, Vec3{std::cos(a) * s.width * .15f, std::sin(a) * s.width * .15f,
+                                    s.height * r.range(-.08f, .10f)});
     }
-    const unsigned sprays = 26;
+    const float leaf_ref = .5f * (s.width + s.height);
+    const unsigned sprays = 30;
     for (unsigned i = 0; i < sprays; ++i) {
         const bool keep = !b.far || (i % 5 < 2);
         const auto& lobe = lobes[i % lobes.size()];
-        const float a = r() * 2 * pi, z = r.range(-.35f, 1.0f), ring = std::sqrt(std::max(0.0f, 1 - z * z));
-        const float depth = r.range(.58f, 1.0f);
+        const float a = r() * 2 * pi, z = r.range(-.45f, 1.0f), ring = std::sqrt(std::max(0.0f, 1 - z * z));
+        const float depth = r.range(.55f, 1.0f);
         const float jitter_x = r.range(-.45f, .45f), jitter_y = r.range(-.45f, .45f), jitter_z = r.range(-.2f, .45f);
-        const float sz_rand = r.range(.15f, .24f), col_rand = r.range(.86f, 1.14f);
+        const float sz_rand = r.range(.10f, .16f), col_rand = r.range(.86f, 1.14f);
         const float spin = r() * 2 * pi;
         if (!keep)
             continue;
         const Vec3 dir{std::cos(a) * ring, std::sin(a) * ring, z};
-        const auto at = add(lobe, Vec3{dir.x * s.width * .36f * depth, dir.y * s.width * .36f * depth,
-                                       dir.z * s.height * .36f * depth});
-        const Vec3 sphere_n = normal(sub(at, Vec3{0, 0, s.height * .38f}));
-        const float size = std::max(s.width, s.height) * sz_rand * (b.far ? 1.55f : 1.0f);
+        const auto at = add(lobe, Vec3{dir.x * s.width * .21f * depth, dir.y * s.width * .21f * depth,
+                                       dir.z * s.height * .26f * depth});
+        const Vec3 sphere_n = normal(sub(at, Vec3{0, 0, s.height * .24f}));
+        const float size = leaf_ref * sz_rand * (b.far ? 1.55f : 1.0f);
         // Canopy AO: deep cool shade inside and below, warm sunlit green on the outer crown.
         const float ao = (.46f + .56f * (sphere_n.z * .5f + .5f)) * (.62f + .38f * depth) * col_rand;
         const Vec3 base_col = mul(s.leaf, ao);
@@ -306,8 +308,8 @@ void make_bush(Builder& b, const FloraStyle& s, Random& r) {
     // Branching woody stems anchoring the bush into the ground.
     for (int i = 0; i < (b.far ? 0 : 5); ++i) {
         const float a = i * 2 * pi / 5 + r.range(-.3f, .3f);
-        const float h = s.height * r.range(.45f, .65f), lean = s.width * r.range(.15f, .28f);
-        blade(b, {0, 0, -.05f}, a, h, lean, std::max(.065f, s.width * .055f), {.16f, .11f, .07f}, {.24f, .17f, .1f}, 2,
+        const float h = s.height * r.range(.32f, .48f), lean = s.width * r.range(.10f, .18f);
+        blade(b, {0, 0, -.05f}, a, h, lean, std::max(.04f, s.width * .032f), {.16f, .11f, .07f}, {.24f, .17f, .1f}, 2,
               .15f);
     }
 }
@@ -578,9 +580,9 @@ FloraStyle widget_style(const std::string& id, const WidgetModel& widget, const 
         {"CAH1", grass, {.3f, .17f, .13f}, {}},          {"CAH2", grass, {.3f, .17f, .13f}, {}},
         {"CAH3", grass, {.3f, .17f, .13f}, {}},            {"CAP1", rock, {.55f, .3f, .28f}, {}},
         {"CPL1", mushroom, {}, {.85f, .4f, .15f}},        {"CPL2", mushroom, {}, {.7f, .35f, .45f}},
-        {"CPL3", mushroom, {}, {.85f, .4f, .15f}},        {"JAW1", bush, {.3f, .42f, .14f}, {}},
-        {"JAW2", bush, {.3f, .42f, .14f}, {}},            {"JAW3", bush, {.3f, .42f, .14f}, {}},
-        {"JAW4", bush, {.3f, .42f, .14f}, {}},            {"JAW5", bush, {.3f, .42f, .14f}, {}},
+        {"CPL3", mushroom, {}, {.85f, .4f, .15f}},        {"JAW1", bush, {.28f, .29f, .15f}, {}},
+        {"JAW2", bush, {.28f, .29f, .15f}, {}},           {"JAW3", bush, {.28f, .29f, .15f}, {}},
+        {"JAW4", bush, {.28f, .29f, .15f}, {}},           {"JAW5", bush, {.28f, .29f, .15f}, {}},
         {"PYA1", rock, {.2f, .19f, .19f}, {}},            {"PYA2", rock, {.2f, .19f, .19f}, {}},
         {"PYA3", rock, {.2f, .19f, .19f}, {}},            {"PYA4", rock, {.2f, .19f, .19f}, {}},
         {"SAW1", crystal, {.76f, .9f, .98f}, {}},         {"SAW2", crystal, {.76f, .9f, .98f}, {}},
@@ -608,6 +610,8 @@ FloraStyle widget_style(const std::string& id, const WidgetModel& widget, const 
         style.height = std::clamp(style.height, .3f, std::max(.6f, style.width * .9f));
     else if (style.kind == FloraKind::fern)
         style.height = std::max(style.height, style.width * .35f);
+    else if (style.kind == FloraKind::grass && style.height > 1.2f * style.width)
+        style.height *= .68f;
     return style;
 }
 std::vector<FloraModel> make_flora(const FloraStyle& style, std::uint32_t seed, unsigned variants, bool far) {
