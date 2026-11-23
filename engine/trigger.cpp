@@ -697,9 +697,15 @@ const SpellDefinition* Triggers::spell(Instance& instance) {
     return definition;
 }
 void Triggers::start(std::uint32_t skirmish_sides) {
+    const bool solo_skirmish = skirmish_sides && (skirmish_sides & (skirmish_sides - 1)) == 0;
     for (auto& trigger : triggers_) {
         // The stock result template is assigned only to sides 0 and 1, even on larger maps.
-        const bool expanded = (skirmish_sides & ~3u) && stock_skirmish_result(trigger.definition);
+        const bool stock_result = stock_skirmish_result(trigger.definition);
+        if (solo_skirmish && stock_result && trigger.definition.action.front() == tc::ActionEndMissionInVictory) {
+            trigger.pending = 0;
+            continue;
+        }
+        const bool expanded = skirmish_sides && stock_result;
         if (expanded)
             trigger.pending = skirmish_sides;
         for (int i = 0; i < 32; ++i)

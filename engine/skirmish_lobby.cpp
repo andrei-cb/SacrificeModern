@@ -105,7 +105,7 @@ bool SkirmishLobby::can_start() const {
             ++teams;
         }
     }
-    return local >= 0 && participants > 1 && teams > 1;
+    return local >= 0 && (participants == 1 || (participants > 1 && teams > 1));
 }
 
 std::vector<SkirmishSlot> SkirmishLobby::session() const {

@@ -33,7 +33,7 @@ class SkirmishLobby {
     void cycle_team(int row); // 0x4a0c10: (team + 1) & 3.
     void cycle_god(int row);  // 0x4a0b50: (god + 1) % 6; observer/custom entries need multiplayer/profiles.
     void take(int row);       // 0x4a1160: the player moves to an open or computer row.
-    // 0x4a1800 offline: at least two participants that are not all on one team.
+    // 0x4a1800 offline: at least two participants that are not all on one team; port also allows a solo player.
     [[nodiscard]] bool can_start() const;
     [[nodiscard]] std::vector<SkirmishSlot> session() const;
 };

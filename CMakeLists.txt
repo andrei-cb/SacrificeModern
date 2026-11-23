@@ -367,7 +367,6 @@ endif()
 if(WIN32)
 install(TARGETS SacrificeModern sacrifice_tools RUNTIME DESTINATION .)
 install(FILES README.md DESTINATION .)
-install(DIRECTORY docs DESTINATION .)
 install(DIRECTORY "${VCPKG_INSTALLED_DIR}/x64-windows/bin/" DESTINATION .
   FILES_MATCHING PATTERN "*.dll" PATTERN "pkgconf*.dll" EXCLUDE)
 install(FILES ${SACRIFICE_FFMPEG_DLLS} DESTINATION .)

@@ -284,13 +284,24 @@ SceneMatch::SceneMatch(MapScene& scene, const Terrain& terrain, CrtRandom& rando
                 spawn.object = &object;
             } else {
                 auto& object = static_cast<SoulActor&>(
-                    match_.create(MatchObject::soul, [] { return std::make_unique<SoulActor>(); }));
+                    match_.create(MatchObject::soul, [] { return std::make_unique<SoulActor>(); }, nullptr,
+                                  [&](MatchObject& reused) {
+                                      for (auto& prior : scene_.models)
+                                          if (prior.soul_object == &reused) {
+                                              prior.soul_object = nullptr;
+                                              prior.visible.assign(1, false);
+                                          }
+                                      for (auto& prior : scene_.spawns)
+                                          if (prior.object == &reused)
+                                              prior.object = nullptr;
+                                  }));
+                const auto spawn_model = spawn.model;
+                const auto p = spawn.placement.position;
+                const auto frames = scene.models.at(spawn_model).asset.textures.front()->header.frames;
                 allegiance->attach(object);
-                const auto& p = spawn.placement.position;
-                object.initialize(match_, {p.x, p.z, p.y - 2}, nullptr, 1,
-                                  model.asset.textures.front()->header.frames);
+                object.initialize(match_, {p.x, p.z, p.y - 2}, nullptr, 1, frames);
                 object.bind_spatial(spatial_);
-                bind_soul_visual(object, {spawn.model});
+                bind_soul_visual(object, {spawn_model});
                 spawn.object = &object;
             }
         }
@@ -457,9 +468,12 @@ SoulActor* SceneMatch::create_souls(Vec3 point, MatchObject* source, int amount)
     std::vector<std::size_t> models;
     for (unsigned sprite = 0; sprite < sprites; ++sprite) {
         auto vacant = std::ranges::find_if(scene_.models, [&](const SceneModel& model) {
+            const auto index = static_cast<std::size_t>(&model - scene_.models.data());
             return model.soul && !model.soul_object &&
-                   std::ranges::find(models, static_cast<std::size_t>(&model - scene_.models.data())) ==
-                       models.end();
+                   std::ranges::find(models, index) == models.end() &&
+                   !std::ranges::any_of(scene_.spawns, [&](const MapScene::Spawn& spawn) {
+                       return spawn.kind == MapScene::Spawn::Kind::soul && !spawn.object && spawn.model == index;
+                   });
         });
         if (vacant == scene_.models.end()) {
             SceneModel model{FourCC::from_text("spir")};
