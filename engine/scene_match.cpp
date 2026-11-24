@@ -326,6 +326,19 @@ SceneMatch::SceneMatch(MapScene& scene, const Terrain& terrain, CrtRandom& rando
         for (const auto& object : match_.objects())
             if ((object->kind_flags & 0x14) && !object->controller && object->allegiance)
                 object->controller = object->allegiance->wizard();
+        // 0x4581e0 -> 0x457cb0 -> 0x464ff0(spout, primary, 2): reserve the map fountain referenced
+        // by NTTS +44 on pre-placed manaliths.
+        for (const auto& spawn : scene.spawns)
+            if (spawn.kind == MapScene::Spawn::Kind::building && spawn.reservation_id)
+                if (auto* actor = dynamic_cast<BuildingActor*>(spawn.object); actor && !actor->primary)
+                    match_.visit_group(2, 16, [&](MatchObject& candidate) {
+                        auto* spout = dynamic_cast<BuildingActor*>(&candidate);
+                        if (spout && !spout->primary && spout->script_id == spawn.reservation_id) {
+                            spout->reserve(actor, 2);
+                            return -1;
+                        }
+                        return 0;
+                    });
         // 0x4a9d70: slot n takes the first listed side whose flag nibble is n.
         std::uint32_t skirmish_sides = 0;
         for (unsigned slot = 1; slot <= 5 && slot <= skirmish.size(); ++slot) {

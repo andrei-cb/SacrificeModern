@@ -31,6 +31,7 @@ struct MapEntity {
     std::int32_t side{};   // +32; identity only until native SIDE controllers are bound.
     // +40: the name trigger code refers to (0x458240 / 0x457cb0 pass it to 0x46af00, object +1044).
     std::uint32_t script_id{0xffffffff};
+    std::uint32_t reservation_id{}; // Buildings (+44): script ID of the reserved mana fountain (0x4581e0).
     Vec2 extent; // Script points (+44): circle radius, or box half extents.
     int wizard_level{-1};
     std::uint8_t wizard_god{};
@@ -185,6 +186,7 @@ struct MapScene {
         int wizard_level{-1};
         std::uint8_t wizard_god{};
         std::uint32_t script_id{0xffffffff};
+        std::uint32_t reservation_id{};
     };
     struct BuildingGroup {
         Building definition;

@@ -44,6 +44,8 @@ MapEntity MapEntity::decode(const EntityRecord& record) {
             if (r.remaining() >= 8) {
                 r.u32();
                 entity.script_id = r.u32();
+                if (entity.type == 2 && r.remaining() >= 4)
+                    entity.reservation_id = r.u32();
                 if (entity.type == 4096 && r.remaining() >= 8) {
                     entity.extent.x = r.f32();
                     entity.extent.y = r.f32();
@@ -594,6 +596,7 @@ MapScene MapScene::compose(const ResourceCatalog& catalog, const Archive& map, c
                 spawn.building_group = group;
                 spawn.building_part = part_index;
                 spawn.script_id = entity.script_id;
+                spawn.reservation_id = entity.reservation_id;
                 const unsigned initial_state = entity.flags & 0x10000 ? 2 : 0;
                 std::map<std::uint32_t, std::pair<std::size_t, std::size_t>> placed;
                 for (unsigned state = 0; state < 3; ++state) {
