@@ -1113,6 +1113,8 @@ int run_chain_lightning(Match& match, SpellActor& spell, int ticks) {
                          spell.data->radius);
             attach_hit(match, spell, target, target->motion.position);
             mark_hit(*target, spell);
+        } else {
+            attach_hit(match, spell, nullptr, spell.ability.destination);
         }
         auto& tail =
             launch_child(match, spell, SpellActor::Effect::chain_lightning, target, spell.motion.position);
@@ -1121,12 +1123,27 @@ int run_chain_lightning(Match& match, SpellActor& spell, int ticks) {
         tail.generic = spell.generic;
         tail.host.rate = spell.host.rate;
         tail.stage = 64;
+        if (spell.rate >= 6)
+            return remove_spell(spell);
         spell.motion.position = spell.ability.destination;
-        const float reach = (6 - ++spell.rate) * (1.f / 6) * spell.data->spread_limit;
+        const float reach = (6 - spell.rate) * (1.f / 6) * spell.data->spread_limit;
+        ++spell.rate;
         spell.effect_target = nearest_unit(match, spell.motion.position, reach,
                                            (spell.owner ? spell.owner : &spell), true, &spell);
-        if (spell.rate >= 6 || !spell.effect_target)
-            return remove_spell(spell);
+        if (spell.effect_target) {
+            spell.point = spell.motion.position;
+            spell_target_point(spell.point, spell.effect_target);
+        } else {
+            const float step = reach * 0.00006103515625f;
+            spell.point.x = static_cast<float>(match.random().next() - 0x4000) * step +
+                            spell.motion.position.x;
+            spell.point.y = static_cast<float>(match.random().next() - 0x4000) * step +
+                            spell.motion.position.y;
+            spell.point.z = match.terrain
+                                ? static_cast<float>(terrain_surface(*match.terrain, spell.point.x,
+                                                                     spell.point.y))
+                                : spell.motion.position.z;
+        }
         spell.stage = 16;
     }
     return spell.stage >= 240 ? remove_spell(spell) : 1;
