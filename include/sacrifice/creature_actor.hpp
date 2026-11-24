@@ -177,6 +177,7 @@ class CreatureActor : public MatchObject {
     bool issue_spell_order(FourCC id, MatchObject* target, std::optional<Vec3> point = {});
     bool find_summon_point(Match& match, Vec3& point) const;   // 0x458ae0.
     bool summon_creature(Match& match, FourCC id, Vec3 point); // 0x481900, soul payment on release.
+    void follow_and_select(Match& match);                      // 0x45d300, follow controller and select locally.
     void change_souls(int delta);                              // Offline 0x459200.
     void execute_orders(Match& match); // 0x46de80, invoked before regeneration/animation.
     int terrain_visibility(Match& match, MatchObject* target, std::optional<Vec3> point = {}) const;

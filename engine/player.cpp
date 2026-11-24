@@ -154,6 +154,14 @@ MatchObject* PlayerControl::toggle(MatchObject* object, int mode, MatchObject* l
     selection.add(object, stamp);
     return !leader || rank(leader) < rank(object) ? object : leader;
 }
+void PlayerControl::select_spawned(CreatureActor& actor) {
+    // 0x45d300 -> 0x461e00(0, actor) + 0x461c40(actor, 1, 0).
+    if (!actor.controller || actor.controller != wizard())
+        return;
+    groups[0].remove(&actor);
+    groups[0].add(&actor, stamp);
+    toggle(&actor, 1, nullptr);
+}
 void PlayerControl::acknowledge(MatchObject* leader, FourCC id, bool repeat) {
     if (!leader)
         return;

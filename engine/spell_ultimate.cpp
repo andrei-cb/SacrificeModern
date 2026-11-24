@@ -400,13 +400,12 @@ int run_child_visual(Match& match, SpellActor& spell, int ticks) {
     }
     return spell.stage == 240 && spell.cast_alpha <= 0 ? remove_spell(spell) : 1;
 }
-void convert_side(CreatureActor& victim, SpellActor& spell) {
-    // vtable +104 with the caster's SIDE, then 0x45D300 follow.
+void convert_side(Match& match, CreatureActor& victim, SpellActor& spell) {
+    // vtable +104 with the caster's SIDE, then 0x45D300 follow and local selection.
     if (!spell.allegiance)
         return;
     spell.allegiance->attach(victim);
-    if (auto* wizard = dynamic_cast<CreatureActor*>(spell.owner))
-        victim.issue_order({.kind = 5, .target = wizard});
+    victim.follow_and_select(match);
 }
 int streamer_tick(Match& match, SpellActor& spell, int ticks, bool draining = false) {
     auto& tail = spell.altar_streamer;
@@ -562,7 +561,7 @@ int run_charm(Match& match, SpellActor& spell, int ticks) {
         spell.remaining = 180;
         spell.stage = 64;
         if (!spell.ability.clock && target) {
-            convert_side(*target, spell);
+            convert_side(match, *target, spell);
             attach_hit(match, spell, target, target->motion.position);
             auto& heart =
                 launch_child(match, spell, SpellActor::Effect::charm_heart, target, target->motion.position);

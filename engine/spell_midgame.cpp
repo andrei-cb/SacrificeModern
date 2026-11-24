@@ -1189,6 +1189,7 @@ int run_animate_dead(Match& match, SpellActor& spell, int ticks) {
         if (corpse) {
             spell.sound_event(match, 16);
             corpse->fsm().event(50);
+            corpse->follow_and_select(match);
         }
         spell.next_pulse = 0;
         spell.stage = 240;

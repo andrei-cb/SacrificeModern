@@ -122,6 +122,9 @@ class PlayerControl {
     // 0x461e70 from the match's reference event (bit 4: death, side change or removal): drop the object
     // from the selection, the box baseline and all ten groups, so pooled objects never come back selected.
     void forget(const MatchObject& object);
+    // 0x45d300: add a newly summoned, converted or revived creature controlled by the local wizard
+    // to group 0 and the live selection.
+    void select_spawned(CreatureActor& actor);
     // 'Kcr?' / 'Ksp?' / 'Ksh?' n (0x4636b0): open book 0/1/2 and cast its nth entry (1-based).
     bool cast_slot(int book, int number);
     // 'Kopn' (0x461ed0): open bar tab 0..2, any other value cycles to the next one.

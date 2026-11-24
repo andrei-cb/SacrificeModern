@@ -555,8 +555,6 @@ CreatureActor* SceneMatch::create_creature(CreatureActor& caster, FourCC id, Vec
     actor.bind_spatial(spatial_);
     if (!(actor.status_flags & 0x100) && !(actor.fsm().state()->flags & 0x2000) && (caster.kind_flags & 1))
         caster.allegiance->event(caster, &actor, 8);
-    // 0x45d300: newly summoned creatures follow their side's wizard.
-    actor.issue_order({5, actor.controller});
     bind_character_model(actor, std::move(model), id);
     return &actor;
 }

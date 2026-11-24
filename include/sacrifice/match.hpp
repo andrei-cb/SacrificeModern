@@ -207,6 +207,8 @@ class Match {
     std::function<void(class SpellActor&)> flush_spell_sounds;
     // The local interface's lists (0x461e70): reference events with bit 4 (death 15, side change 14, removal -1).
     std::function<void(MatchObject&)> forget_interface;
+    // 0x45d300: add a newly summoned, converted or revived local-wizard creature to group 0 and selection.
+    std::function<void(class CreatureActor&)> select_interface;
     LandscapeEffects weather;
     struct WeatherSound { int action{}; FourCC sample, group; float volume{}; };
     std::vector<WeatherSound> weather_sounds;

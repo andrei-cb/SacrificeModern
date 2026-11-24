@@ -100,6 +100,10 @@ struct WebGameplay::Impl {
             if (player)
                 player->forget(object);
         };
+        match.select_interface = [this](CreatureActor& actor) {
+            if (player)
+                player->select_spawned(actor);
+        };
         for (unsigned i = 0; i < 2; ++i)
             if (const auto source = catalog.find(id("GBAR"), id(i ? "mbar" : "hbar")))
                 styles[i] = GradientBar::decode(catalog.read(*source));
@@ -123,6 +127,7 @@ struct WebGameplay::Impl {
         release();
         simulation.triggers().is_selected = {};
         match.forget_interface = {};
+        match.select_interface = {};
     }
     unsigned locks() const {
         return simulation.triggers().interface_locks;

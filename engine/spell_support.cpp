@@ -591,6 +591,7 @@ int run_resurrect(Match& match, SpellActor& spell, int ticks) {
         } else if (spell.stage == 128) {
             spell.sound_event(match, 4);
             corpse->fsm().event(50);
+            corpse->follow_and_select(match);
             spell.stage = 240;
         }
         if (spell.stage >= 240)

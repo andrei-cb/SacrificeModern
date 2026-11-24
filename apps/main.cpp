@@ -1709,6 +1709,10 @@ struct Inspector {
             if (player)
                 player->forget(object);
         };
+        match.select_interface = [this](CreatureActor& actor) {
+            if (player)
+                player->select_spawned(actor);
+        };
         simulation->triggers().show_tip = [this](FourCC id) {
             if (!options.value(FourCC::from_text("tipo"))) return;
             tip_text = id;

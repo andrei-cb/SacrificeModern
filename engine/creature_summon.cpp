@@ -47,6 +47,13 @@ void CreatureActor::change_souls(int delta) {
     if (allegiance)
         allegiance->change_souls(delta);
 }
+void CreatureActor::follow_and_select(Match& match) {
+    // 0x45d300: follow the controlling wizard and, for the local player's wizard, select and
+    // place the creature in group 0.
+    issue_order({5, controller});
+    if (controller && match.select_interface)
+        match.select_interface(*this);
+}
 bool CreatureActor::summon_creature(Match& match, FourCC id, Vec3 point) {
     if (!network_identity)
         return false;
@@ -58,7 +65,8 @@ bool CreatureActor::summon_creature(Match& match, FourCC id, Vec3 point) {
     if (!match.create_creature)
         throw Error("Summon release requires a creature factory");
     change_souls(std::bit_cast<int>(0u - static_cast<unsigned>(definition->required_souls)));
-    match.create_creature(*this, id, point, this);
+    if (auto* actor = match.create_creature(*this, id, point, this))
+        actor->follow_and_select(match);
     return true; // 0x481900 reports success after payment even if the factory returns null.
 }
 SpellActor& SpellActor::launch_summon(Match& match, CreatureActor& actor) {
