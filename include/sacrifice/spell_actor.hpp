@@ -377,6 +377,7 @@ class SpellActor : public MatchObject {
                              const Terrain* terrain = nullptr, std::optional<Vec3> eye = {},
                              std::optional<Vec3> camera_right = {}) const;
     void update_tornado_surface(int ticks);
+    void tornado_centre(float world_z, Vec2& centre, float& radius) const; // TORNADO::GetCentre 0x1600df90.
     void initialize_spike_surface(Match& match, Vec3 half_extents);
     void add_vine(Vec3 root, Vec3 tip, float radius);
     bool advance_vines(int ticks, float goal);

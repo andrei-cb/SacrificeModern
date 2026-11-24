@@ -46,6 +46,28 @@ bool SpellActor::advance_vines(int ticks, float goal) {
     }
     return visible;
 }
+namespace {
+void build_tornado_profile(const std::array<float, 92>& params, std::array<Vec3, 7>& centres,
+                           std::array<float, 7>& radii) {
+    const Vec3 low{params[0], params[1], params[2]}, high{params[4], params[5], params[6]};
+    constexpr float fractions[]{0, 1.f / 6, .25f, .5f, .75f, 5.f / 6, 1};
+    const float base = params[3] / 3, top = params[7];
+    constexpr float radius_t[]{0, .6f, .6f, .675f, .75f, .95f, 1};
+    for (unsigned n = 0; n < 7; ++n) {
+        const float t = fractions[n];
+        centres[n] = {low.x + (high.x - low.x) * t, low.y + (high.y - low.y) * t,
+                      low.z + (high.z - low.z) * t};
+        radii[n] = n ? base + (top - base) * radius_t[n] : params[3];
+    }
+    const float wobble = (high.z - low.z) * .3f;
+    centres[2].x += std::sin(params[9]) * wobble;
+    centres[2].y += std::sin(params[10]) * wobble;
+    centres[4].x += std::sin(params[11]) * wobble;
+    centres[4].y += std::sin(params[12]) * wobble;
+    centres[3] = {(centres[2].x + centres[4].x) * .5f, (centres[2].y + centres[4].y) * .5f,
+                  (centres[2].z + centres[4].z) * .5f};
+}
+} // namespace
 // LATHES5D::Draw 0x1600bdd0: two cubic five-component profiles (XYZ, radius, alpha),
 // revolved around Z. TORNADO::SetParams 0x1600ce10 supplies two joined cubic profiles.
 Mesh SpellActor::curved_surface_mesh(unsigned layer, const TextureHeader& texture, float detail,
@@ -343,25 +365,8 @@ Mesh SpellActor::curved_surface_mesh(unsigned layer, const TextureHeader& textur
     }
     std::array<Vec3, 7> centres{};
     std::array<float, 7> radii{};
-    if (surface.kind == CurvedSurface::tornado) {
-        const Vec3 low{p[0], p[1], p[2]}, high{p[4], p[5], p[6]};
-        constexpr float fractions[]{0, 1.f / 6, .25f, .5f, .75f, 5.f / 6, 1};
-        const float base = p[3] / 3, top = p[7];
-        constexpr float radius_t[]{0, .6f, .6f, .675f, .75f, .95f, 1};
-        for (unsigned n = 0; n < 7; ++n) {
-            const float t = fractions[n];
-            centres[n] = {low.x + (high.x - low.x) * t, low.y + (high.y - low.y) * t,
-                          low.z + (high.z - low.z) * t};
-            radii[n] = n ? base + (top - base) * radius_t[n] : p[3];
-        }
-        const float wobble = (high.z - low.z) * .3f;
-        centres[2].x += std::sin(p[9]) * wobble;
-        centres[2].y += std::sin(p[10]) * wobble;
-        centres[4].x += std::sin(p[11]) * wobble;
-        centres[4].y += std::sin(p[12]) * wobble;
-        centres[3] = {(centres[2].x + centres[4].x) * .5f, (centres[2].y + centres[4].y) * .5f,
-                      (centres[2].z + centres[4].z) * .5f};
-    }
+    if (surface.kind == CurvedSurface::tornado)
+        build_tornado_profile(p, centres, radii);
     const bool tornado = surface.kind == CurvedSurface::tornado;
     const unsigned first_row = tornado && layer ? (rows - 1) / 2 : 0;
     const unsigned last_row = tornado && layer == 0 ? (rows - 1) / 2 : rows - 1;
@@ -500,6 +505,20 @@ void SpellActor::update_tornado_surface(int ticks) {
     constexpr float speeds[]{.01f, -.008f, -.013f, .006f};
     for (unsigned n = 9; n < 13; ++n)
         p[n] += ticks * speeds[n - 9];
+}
+void SpellActor::tornado_centre(float world_z, Vec2& centre, float& radius) const {
+    std::array<Vec3, 7> centres{};
+    std::array<float, 7> radii{};
+    build_tornado_profile(surface.parameters, centres, radii);
+    const float low_z = motion.position.z + centres.front().z;
+    const float high_z = motion.position.z + centres.back().z;
+    const float span = high_z - low_z;
+    const float t = span != 0.f ? std::clamp((world_z - low_z) / span, 0.f, 1.f) : 1.f;
+    const unsigned part = t <= .5f ? 0 : 3;
+    const float u = t <= .5f ? t * 2 : (t - .5f) * 2;
+    const auto local = curve({centres[part], centres[part + 1], centres[part + 2], centres[part + 3]}, u);
+    radius = cubic(radii[part], radii[part + 1], radii[part + 2], radii[part + 3], u);
+    centre = {motion.position.x + local.x, motion.position.y + local.y};
 }
 int SpellActor::run_soul_path(Match& match, int ticks) {
     auto* soul = dynamic_cast<SoulActor*>(effect_target);

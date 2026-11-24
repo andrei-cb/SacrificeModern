@@ -1709,19 +1709,26 @@ int run_tornado(Match& match, SpellActor& spell, int ticks) {
             if (height > 0)
                 spell.motion.position.z = height;
         }
-        // 0x423FC0 applies a rotating pull to all movable characters; there is no periodic spell damage.
+        // 0x423FC0: TORNADO::GetCentre at the actor's height supplies the funnel's bent centre
+        // and radius; units within radius + 30 orbit at radius + 15 and lift +2.
         for (unsigned group = 0; group < 2; ++group)
             match.visit_group(group, 5, [&](MatchObject& object) {
                 auto* actor = living_unit(&object);
                 if (!actor || (actor->motion.flags & 0x10000))
                     return 0;
-                const float x = spell.motion.position.x - actor->motion.position.x,
-                            y = spell.motion.position.y - actor->motion.position.y;
+                Vec2 centre{};
+                float radius = 0;
+                spell.tornado_centre(actor->motion.position.z, centre, radius);
+                const float x = centre.x - actor->motion.position.x,
+                            y = centre.y - actor->motion.position.y;
                 const float distance = std::sqrt(x * x + y * y);
-                if (distance > 0 && distance <= 30) {
-                    const float c = std::cos(5.f), s = std::sin(5.f), factor = 15.f / distance;
-                    const Vec3 target{spell.motion.position.x + (x * c - y * s) * factor,
-                                      spell.motion.position.y + (x * s + y * c) * factor,
+                if (distance <= radius + 30) {
+                    // 0x424100: 0x410bc0(&unk_4DCA90, 286.47913f) rotates the inward vector by
+                    // 286.47913 radians (~214 deg), placing the target 44 deg ahead on the radius + 15 circle.
+                    const float c = std::cos(286.47913f), s = std::sin(286.47913f),
+                                factor = distance > 0 ? (radius + 15.f) / distance : 0.f;
+                    const Vec3 target{centre.x + (x * c - y * s) * factor,
+                                      centre.y + (x * s + y * c) * factor,
                                       actor->motion.position.z + 2};
                     spell_approach_velocity(actor->motion, target, ticks * .05f, .5f);
                 }
