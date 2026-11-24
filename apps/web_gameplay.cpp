@@ -58,6 +58,7 @@ struct WebGameplay::Impl {
     PlayerPointer pointer;
     CommandMenu menu;
     bool third_person{true}, engaged{}, orbit{}, was_cinematic{};
+    std::optional<std::uint32_t> released_at; // Match clock at release(): see drive().
     int displayed_book{-1};
     CreatureActor* book_wizard{};
     std::array<bool, 3> allowed{};
@@ -128,8 +129,10 @@ struct WebGameplay::Impl {
     }
     void release() {
         engaged = false;
-        if (player && player->wizard())
+        if (player && player->wizard()) {
             player->wizard()->input_provider = {};
+            released_at = match.clock().match;
+        }
     }
     const Texture& texture(FourCC name, FourCC tag = id("TXTR")) {
         const auto [entry, added] = textures.try_emplace(std::pair{tag, name});
@@ -197,6 +200,11 @@ struct WebGameplay::Impl {
             return;
         }
         engaged |= keyboard.engaged();
+        // As in the desktop frontend: a released (casting) wizard gets one match update without input so
+        // 0x46de80 fires its queued cast (event 41) before held keys take over again.
+        if (released_at && match.clock().match == *released_at)
+            return;
+        released_at.reset();
         if (engaged)
             if (auto* wizard = player->wizard())
                 wizard->input_provider = [axes = keyboard.axes()] { return axes; };

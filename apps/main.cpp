@@ -259,6 +259,7 @@ struct Inspector {
     CameraShake shake;
     CrtRandom shake_random; // Stands in for the shared rand() of 0x47fbb0.
     bool third_person{true}, keyboard_engaged{}, dragging{};
+    std::optional<std::uint32_t> keyboard_released; // Match clock at release_wizard (see drive()).
     std::array<bool, 3> orbit_allowed{};
     std::optional<PointerButton> orbit_button;
     bool left_world{};
@@ -1605,6 +1606,13 @@ struct Inspector {
             wizard->strafe_turn = 0;
         }
         keyboard_engaged |= keyboard.engaged();
+        // Natively the tick (0x4525d0) runs before this poll and the clicks (0x451ea0 -> 0x464000), so a
+        // cast released by 0x452bc0 gets one match update without +2204: 0x46de80 then fires the queued
+        // cast (event 41 keeps walking) instead of discarding it. Polling ahead of the tick, the port
+        // withholds the input until the clock has moved past the release.
+        if (keyboard_released && simulation->match().clock().match == *keyboard_released)
+            return;
+        keyboard_released.reset();
         if (keyboard_engaged)
             wizard->input_provider = [axes = keyboard.axes()] { return axes; };
     }
@@ -1612,8 +1620,10 @@ struct Inspector {
     // queue until the next key press (0x451ea0).
     void release_wizard() {
         keyboard_engaged = false;
-        if (auto* wizard = local_wizard())
+        if (auto* wizard = local_wizard()) {
             wizard->input_provider = {};
+            keyboard_released = simulation->match().clock().match;
+        }
     }
     // After the match tick: native middle/Ctrl-left drags orbit the view ('drag', 0x4810c0).
     bool follow_wizard(const InputState& input, unsigned width, unsigned height) {
