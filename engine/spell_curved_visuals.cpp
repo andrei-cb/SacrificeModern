@@ -618,6 +618,11 @@ int SpellActor::run_soul_path(Match& match, int ticks) {
                                                    data->spread_limit * data->spread_limit) <=
                             data->spread_limit * data->spread_limit) {
                         victim->name_reference(spell_id, this);
+                        auto& arc = launch_inert_lightning(match, *this, motion.position,
+                                                           victim->motion.position, victim, 1.5f, .01f, .5f,
+                                                           2, .5f, 1);
+                        arc.sound_requests.push_back(
+                            {FourCC::from_text("Xltn"), FourCC::from_text("Xltn"), arc.reference(), 0x40004});
                         victim->knock_down(0, 10);
                         spell_damage(match, this, victim, data->damage_type, data->amount, data->radius);
                     }
