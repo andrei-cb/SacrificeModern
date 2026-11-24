@@ -261,9 +261,12 @@ int SpellActor::run_lightning(Match& match, int ticks) {
     }
     if (!stage) {
         spell_target_point(point, effect_target);
-        motion.position.x = static_cast<float>(match.random().next() * 60.0 / 32768 - 30 + motion.position.x);
-        motion.position.y = static_cast<float>(match.random().next() * 60.0 / 32768 - 30 + motion.position.y);
-        motion.position.z += 100;
+        if (!owner) {
+            // 0x422cb0 -> 0x44c0d0(state, spell, 38, 2, 1): only ownerless bolts strike from the sky.
+            motion.position.x = static_cast<float>(match.random().next() * 60.0 / 32768 - 30 + motion.position.x);
+            motion.position.y = static_cast<float>(match.random().next() * 60.0 / 32768 - 30 + motion.position.y);
+            motion.position.z += 100;
+        }
         // 0x4355e0 with flag 2 traces at least the range, and substitutes the nearest object or land hit.
         const auto delta = difference(point, motion.position);
         const auto distance = length(delta);
