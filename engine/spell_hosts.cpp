@@ -144,6 +144,7 @@ bool SpellActor::casterless_skips_cast(Effect effect) {
     case Effect::death:
     case Effect::intestinal_vap:
     case Effect::lethargy:
+    case Effect::freeze:
     case Effect::bore:
     case Effect::bovine:
     case Effect::halo_of_earth:

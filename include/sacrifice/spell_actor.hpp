@@ -274,6 +274,7 @@ class SpellActor : public MatchObject {
     static constexpr std::uintptr_t air_shield_absorb_function = 0x41f6e0;
     static constexpr std::uintptr_t vines_visual_function = 0x42bd10;
     static constexpr std::uintptr_t freeze_ice_function = 0x421700;
+    static constexpr std::uintptr_t freeze_damage_function = 0x4216e0; // FreezeSpellInterrupt.
     static constexpr std::uintptr_t cast_spiral_function = 0x43a840; // Caster-orbit streamer (0x43A760).
     static constexpr std::uintptr_t rock_fragments_function = 0x439270;
     static constexpr std::uintptr_t rain_fire_drop_function = 0x428e40;

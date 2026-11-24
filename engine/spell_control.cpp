@@ -58,6 +58,7 @@ void name_para(CreatureActor& actor, SpellActor& spell) {
 void drop_para(CreatureActor* actor, SpellActor& spell) {
     if (!actor)
         return;
+    actor->state_flags &= ~0x80000u;
     actor->unname(para(), &spell);
     if (spell.spell_id.value)
         actor->unname(spell.spell_id, &spell);
@@ -370,6 +371,7 @@ template <class Play> int run_freeze(Match& match, SpellActor& spell, int ticks,
         spell.remaining = control_duration(spell, spell.data->duration, target);
         spell.age = 0;
         spell.emission = 1;
+        match.watch(*target, 0, {&spell, spell.reference(), SpellActor::freeze_damage_function});
         spawn_control_child(match, spell, SpellActor::Effect::freeze_ice, target, target->motion.position);
         match.assign(spell, spell_function_id("FreezeSpellRun"));
         spell.stage = 2;
@@ -377,22 +379,32 @@ template <class Play> int run_freeze(Match& match, SpellActor& spell, int ticks,
     }
     if (spell.stage == 2) {
         target = living_unit(spell.effect_target);
-        if (target) {
+        // 0x421630: hold while the timer runs, the victim lives, and its FSM is (or enters, event 24)
+        // the frozen state with flag 0x20.
+        const bool hold = (spell.remaining -= ticks) > 0 && target && target->fsm().state() &&
+                          ((target->fsm().state()->flags & 0x20) || target->fsm().event(24) == 2);
+        if (hold) {
             follow_target(spell);
             pin_unit(*target, target->motion.position);
             spell.age = std::min(1.f, spell.age + ticks * .05f);
-        }
-        spell.remaining -= ticks;
-        if (spell.remaining <= 0 || !target)
+        } else {
             spell.stage = 32;
+        }
     }
     if (spell.stage == 32) {
-        // FreezeSpellRun 0x4217C0 stage 32: 0x44D7E0 damage, then the ice shatters at once into 'tsha'
-        // ('shrd') bits, 'inum' (48) of them at speed 3 from the ice box (0x439440 flags 1, sound 16).
-        target = living_unit(spell.effect_target);
-        if (target)
-            spell_damage(match, &spell, target, spell.data->damage_type, spell.data->amount,
-                         spell.data->radius);
+        // FreezeSpellRun 0x4217C0 stage 32: unwatch, FSM event 25, 0x44D7E0 damage, then the ice shatters
+        // at once into 'tsha' ('shrd') bits, 'inum' (48) of them at speed 3 from the ice box (0x439440).
+        auto* victim = dynamic_cast<CreatureActor*>(spell.effect_target);
+        if (victim) {
+            match.unwatch(*victim, 0, spell.reference(), &spell);
+            victim->fsm().event(25);
+            if (victim->alive())
+                spell_damage(match, &spell, victim, spell.data->damage_type, spell.data->amount,
+                             spell.data->radius);
+            if ((!victim->alive() || victim->stats.current[CreatureStats::health] <= 0) &&
+                (victim->kind_flags & 5))
+                victim->fsm().event(5);
+        }
         if (const auto* box = spell.effect_target ? spell.effect_target->source_motion() : nullptr) {
             spell.motion.position = box->position;
             const Vec3 low{box->box_min.x * .8f, box->box_min.y * .8f, box->box_min.z * .8f},

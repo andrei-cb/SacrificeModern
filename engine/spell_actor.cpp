@@ -687,6 +687,13 @@ void SpellActor::bind_functions(Match& match) {
         spell.stack[1] = static_cast<std::uint32_t>(static_cast<std::int64_t>(amount * .2));
         return 1;
     });
+    match.functions.try_emplace(freeze_damage_function, [](MatchObject& object, int) {
+        // 0x4216e0: any positive damage breaks Freeze on the next tick.
+        auto& spell = dynamic_cast<SpellActor&>(object);
+        if (spell.stack.size() >= 2 && std::bit_cast<int>(spell.stack[1]) > 0)
+            spell.remaining = 0;
+        return 1;
+    });
     match.functions.try_emplace(air_shield_absorb_function, [](MatchObject& object, int) {
         auto& spell = dynamic_cast<SpellActor&>(object);
         if (spell.stack.size() < 2 || !spell.data)
